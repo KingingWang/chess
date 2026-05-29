@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/chess-core",
+    "crates/chess-ai",
+    "crates/chess-net",
+    "crates/chess-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Chess Project"]
+
+[workspace.dependencies]
+chess-core = { path = "crates/chess-core" }
+chess-ai = { path = "crates/chess-ai" }
+chess-net = { path = "crates/chess-net" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+
+# Release profile tuned for the AI search hot path.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 3

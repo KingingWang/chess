@@ -1,0 +1,35 @@
+[package]
+name = "chess-app"
+description = "Bevy front-end wiring the Xiangqi rules engine, AI, and LAN networking."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "chess"
+path = "src/main.rs"
+
+[dependencies]
+chess-core = { workspace = true, features = ["serde"] }
+chess-ai = { workspace = true }
+chess-net = { workspace = true }
+tokio = { workspace = true }
+crossbeam-channel = "0.5"
+tracing = { workspace = true }
+
+[dependencies.bevy]
+version = "0.18"
+default-features = false
+features = [
+    "2d",
+    "ui",
+    "ui_picking",
+    "default_font",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_log",
+    "png",
+    "x11",
+    "wayland",
+    "multi_threaded",
+]
