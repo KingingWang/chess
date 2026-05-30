@@ -1,4 +1,4 @@
-//! Non-blocking LAN networking bridge.
+//! Non-blocking networking bridge (LAN direct or relayed over the internet).
 //!
 //! A Tokio task owns the [`chess_net::Session`]; it forwards locally-issued
 //! commands (move/resign/draw) to the peer and pushes received peer events back
@@ -7,8 +7,23 @@
 
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, Move};
-use chess_net::{Message, Role, Session};
+use chess_net::{Message, RelayClientConfig, Role, Session};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
+
+/// Resolved relay client configuration, loaded once at startup and shared with
+/// the networking task whenever a server (internet) game starts.
+#[derive(Resource, Clone)]
+pub struct RelayConfig(pub RelayClientConfig);
+
+/// Where/how to establish the networked session.
+pub enum NetTarget {
+    /// Direct LAN connection (host binds / guest connects to `addr`).
+    Lan { role: Role, addr: String },
+    /// Create a relayed room on the relay server.
+    RelayHost { cfg: RelayClientConfig },
+    /// Join a relayed room by number on the relay server.
+    RelayJoin { cfg: RelayClientConfig, room: String },
+}
 
 /// Command sent from Bevy -> the network task.
 #[derive(Debug, Clone)]
@@ -22,6 +37,8 @@ pub enum NetCommand {
 /// Event sent from the network task -> Bevy.
 #[derive(Debug, Clone)]
 pub enum NetEvent {
+    /// Relay host only: the server assigned this room number to share.
+    RoomCreated(String),
     Connected { my_color: ChessColor },
     PeerMove(Move),
     PeerResign,
@@ -38,11 +55,10 @@ pub struct NetLink {
     pub inbound: Receiver<NetEvent>,
 }
 
-/// Spawn the network task for a host or guest, returning the [`NetLink`].
+/// Spawn the network task for the given target, returning the [`NetLink`].
 pub fn start_net(
     runtime: &tokio::runtime::Runtime,
-    role: Role,
-    addr: String,
+    target: NetTarget,
     host_color: ChessColor,
     name: String,
     password: String,
@@ -51,16 +67,10 @@ pub fn start_net(
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
     runtime.spawn(async move {
-        let session = match role {
-            Role::Host => Session::host(addr.as_str(), host_color, &name, &password).await,
-            Role::Guest => Session::join(addr.as_str(), &name, &password).await,
-        };
+        let session = establish(target, host_color, &name, &password, &evt_tx).await;
         let mut session = match session {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
-                return;
-            }
+            Some(s) => s,
+            None => return, // an error was already reported
         };
         let _ = evt_tx.send(NetEvent::Connected {
             my_color: session.my_color,
@@ -72,6 +82,49 @@ pub fn start_net(
     NetLink {
         out: cmd_tx,
         inbound: evt_rx,
+    }
+}
+
+/// Establish the session for `target`, reporting errors via `evt_tx`. Returns
+/// `None` (after sending an `Error`) on failure.
+async fn establish(
+    target: NetTarget,
+    host_color: ChessColor,
+    name: &str,
+    password: &str,
+    evt_tx: &Sender<NetEvent>,
+) -> Option<Session> {
+    let result = match target {
+        NetTarget::Lan { role, addr } => match role {
+            Role::Host => Session::host(addr.as_str(), host_color, name, password).await,
+            Role::Guest => Session::join(addr.as_str(), name, password).await,
+        },
+        NetTarget::RelayHost { cfg } => {
+            // Two phases: create (learn the room number to share), then wait
+            // for the guest, then run the color-assignment handshake.
+            match Session::relay_create(&cfg, password).await {
+                Ok(pending) => {
+                    let _ = evt_tx.send(NetEvent::RoomCreated(pending.room.clone()));
+                    match pending.await_guest().await {
+                        Ok(conn) => Session::handshake_as_host(conn, host_color, name).await,
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        }
+        NetTarget::RelayJoin { cfg, room } => {
+            Session::join_relay(&cfg, &room, name, password).await
+        }
+    };
+
+    match result {
+        Ok(s) => Some(s),
+        Err(e) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            None
+        }
     }
 }
 
@@ -146,8 +199,14 @@ pub fn poll_net_events(
     };
     while let Ok(evt) = link.inbound.try_recv() {
         match evt {
+            NetEvent::RoomCreated(room) => {
+                info!(%room, "relay room created");
+                core.room_code = Some(room);
+                core.awaiting_peer = true;
+            }
             NetEvent::Connected { my_color } => {
                 core.local_color = my_color;
+                core.awaiting_peer = false;
                 info!(?my_color, "connected to peer");
             }
             NetEvent::PeerMove(mv) => {
@@ -169,7 +228,10 @@ pub fn poll_net_events(
                 }
             }
             NetEvent::Error(e) => warn!(error = %e, "network error"),
-            NetEvent::Disconnected => warn!("peer disconnected"),
+            NetEvent::Disconnected => {
+                core.awaiting_peer = false;
+                warn!("peer disconnected");
+            }
         }
     }
 }

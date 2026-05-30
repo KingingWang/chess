@@ -1,0 +1,30 @@
+[package]
+name = "chess-relay"
+description = "End-to-end-encrypted relay server brokering internet Xiangqi rooms (the server never sees game data)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "chess-relay"
+path = "src/main.rs"
+
+[dependencies]
+chess-net = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+getrandom = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+chess-core = { workspace = true }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }

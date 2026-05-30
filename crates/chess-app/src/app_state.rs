@@ -22,6 +22,10 @@ pub enum GameMode {
     LanHost,
     /// LAN guest.
     LanJoin,
+    /// Internet host via the relay server (creates a room).
+    RelayHost,
+    /// Internet guest via the relay server (joins by room number).
+    RelayJoin,
 }
 
 /// Selected difficulty for [`GameMode::VsAi`].
@@ -53,6 +57,10 @@ pub struct CoreGame {
     pub local_color: ChessColor,
     /// True while an unanswered draw offer from the peer is pending.
     pub draw_offer_from_peer: bool,
+    /// Relay room number to display (host: assigned; guest: the one joined).
+    pub room_code: Option<String>,
+    /// True while a networked game is still waiting for the peer to connect.
+    pub awaiting_peer: bool,
 }
 
 impl Default for CoreGame {
@@ -62,6 +70,8 @@ impl Default for CoreGame {
             mode: GameMode::LocalPvp,
             local_color: ChessColor::Red,
             draw_offer_from_peer: false,
+            room_code: None,
+            awaiting_peer: false,
         }
     }
 }
@@ -71,9 +81,11 @@ impl CoreGame {
     pub fn local_to_move(&self) -> bool {
         match self.mode {
             GameMode::LocalPvp => true,
-            GameMode::VsAi | GameMode::LanHost | GameMode::LanJoin => {
-                self.game.side_to_move() == self.local_color
-            }
+            GameMode::VsAi
+            | GameMode::LanHost
+            | GameMode::LanJoin
+            | GameMode::RelayHost
+            | GameMode::RelayJoin => self.game.side_to_move() == self.local_color,
         }
     }
 

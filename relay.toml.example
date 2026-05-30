@@ -1,0 +1,22 @@
+# chess-relay 服务器配置示例。
+#
+# 配置优先级（高 → 低）：配置文件 > 环境变量 > 编译内置默认。
+# 默认读取运行目录下的 relay.toml；可用 `--config <路径>` 指定其它文件。
+#
+# 对应的环境变量：
+#   CHESS_RELAY_HOST  监听地址
+#   CHESS_RELAY_PORT  监听端口
+#   CHESS_RELAY_CERT  TLS 证书路径 (PEM)
+#   CHESS_RELAY_KEY   TLS 私钥路径 (PEM)
+
+# 监听地址（0.0.0.0 表示所有网卡）。
+host = "0.0.0.0"
+
+# 监听端口（WSS + HTTPS 共用同一证书）。
+port = 9443
+
+# TLS 证书 / 私钥（PEM 格式）。
+# 开发可用 ./certs/gen-dev-cert.sh 生成自签证书；
+# 生产建议使用 Let's Encrypt 等受信任 CA 签发的证书。
+cert = "certs/relay.crt"
+key = "certs/relay.key"

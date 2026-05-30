@@ -13,5 +13,15 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 # Symmetric encryption keyed by the room password (RustCrypto, MIT/Apache-2.0).
 chacha20poly1305 = "0.10"
-sha2 = "0.10"
 base64 = "0.22"
+# Password-based key derivation (slow KDF + salt) for weak room passwords.
+argon2 = { workspace = true }
+getrandom = { workspace = true }
+# Relay transport: WebSocket over TLS (rustls + ring backend, OpenSSL-free).
+tokio-tungstenite = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
+futures-util = { workspace = true }
+toml = { workspace = true }

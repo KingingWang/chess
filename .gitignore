@@ -1,1 +1,10 @@
 /target
+
+# 自签 / 私有 TLS 证书与私钥（不要提交到仓库）
+certs/*.crt
+certs/*.key
+*.pem
+
+# 本地实际配置（保留 *.example 模板）
+/relay.toml
+/client.toml

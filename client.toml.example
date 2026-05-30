@@ -1,0 +1,23 @@
+# 客户端中继(联机)配置示例。
+#
+# 配置优先级（高 → 低）：配置文件 > 环境变量 > 编译内置默认。
+# 默认读取运行目录下的 client.toml；可用 `--config <路径>` 指定其它文件。
+#
+# 对应的环境变量：
+#   CHESS_RELAY_HOST      服务器域名/IP
+#   CHESS_RELAY_PORT      服务器端口
+#   CHESS_RELAY_CA        自定义 CA 证书路径（用于校验自签服务器）
+#   CHESS_RELAY_INSECURE  1/true 跳过证书校验（仅限本地调试！）
+
+# 中继服务器域名（编译内置默认为 relay.xiangqi.example.com）。
+host = "relay.xiangqi.example.com"
+
+# 服务器端口。
+port = 9443
+
+# 可选：自签/私有 CA 证书路径。指向服务器使用的 certs/relay.crt
+# 即可在不关闭校验的情况下信任自签服务器。
+# ca_path = "certs/relay.crt"
+
+# 可选：跳过 TLS 证书校验。仅用于本地联调，生产务必为 false。
+insecure = false

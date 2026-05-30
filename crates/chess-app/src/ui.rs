@@ -271,6 +271,13 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
     let Ok(mut text) = q.single_mut() else {
         return;
     };
+    if core.awaiting_peer {
+        **text = match &core.room_code {
+            Some(room) => format!("房间号 {room}\n等待对手加入…"),
+            None => "等待对手加入…".to_string(),
+        };
+        return;
+    }
     let status = if let Some(result) = core.game.result() {
         match result {
             GameResult::Win { winner, reason } => {

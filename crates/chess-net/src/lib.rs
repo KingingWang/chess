@@ -13,11 +13,16 @@
 pub mod connection;
 pub mod crypto;
 pub mod protocol;
+pub mod relay;
 pub mod session;
 
 pub use connection::{connect, Connection, NetError, Server};
 pub use crypto::Cipher;
 pub use protocol::{Message, WireMove, PROTOCOL_VERSION};
+pub use relay::{
+    ControlMsg, PendingRelayHost, RelayClientConfig, RelayError, DEFAULT_RELAY_HOST,
+    DEFAULT_RELAY_PORT,
+};
 pub use session::{HandshakeError, Role, Session};
 
 #[cfg(test)]

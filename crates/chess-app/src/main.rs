@@ -61,6 +61,22 @@ fn resolve_asset_root() -> String {
     "assets".to_string()
 }
 
+/// Load the relay client configuration with precedence
+/// **config file > environment > compiled default**. An optional
+/// `--config <path>` / `--config=<path>` CLI argument selects the file.
+fn load_relay_config() -> net_bridge::RelayConfig {
+    let mut path: Option<std::path::PathBuf> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--config" || arg == "-c" {
+            path = args.next().map(std::path::PathBuf::from);
+        } else if let Some(rest) = arg.strip_prefix("--config=") {
+            path = Some(std::path::PathBuf::from(rest));
+        }
+    }
+    net_bridge::RelayConfig(chess_net::RelayClientConfig::load(path.as_deref()))
+}
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(
@@ -97,6 +113,7 @@ fn main() {
         .init_resource::<lan_dialog::LanDialog>()
         .init_resource::<ai_bridge::AiTask>()
         .insert_resource(AsyncRuntime::new())
+        .insert_resource(load_relay_config())
         .insert_resource(ClearColor(Color::srgb(0.07, 0.07, 0.09)))
         .add_systems(Startup, setup_camera)
         // Menu state.
