@@ -399,9 +399,12 @@ pub fn lan_dialog_buttons(
     mut fields: Query<(&Interaction, &LanFieldButton), (Changed<Interaction>, Without<LanAction>)>,
     mut toggle: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<LanTransportToggle>),
+        (Changed<Interaction>, With<LanTransportToggle>, Without<LanAction>),
     >,
-    mut actions: Query<(&Interaction, &LanAction, &mut BackgroundColor), Changed<Interaction>>,
+    mut actions: Query<
+        (&Interaction, &LanAction, &mut BackgroundColor),
+        (Changed<Interaction>, Without<LanTransportToggle>),
+    >,
 ) {
     for (interaction, field) in &mut fields {
         if *interaction == Interaction::Pressed {
