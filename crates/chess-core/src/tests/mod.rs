@@ -284,3 +284,43 @@ fn iccs_roundtrip() {
     assert!(Move::from_iccs("z9a1").is_none());
     assert!(Move::from_iccs("a0a").is_none());
 }
+
+/// Regression: `is_attacked_by` must detect a horse that checks/attacks a
+/// square from near the board edge, and must respect the leg block — without
+/// the off-board `unwrap` panic that used to occur when the leg offset pointed
+/// the wrong way (away from the target). See board.rs `HORSE_FROM`.
+#[test]
+fn horse_attack_detection_edge_and_leg() {
+    // Target high up the board so the (buggy) leg would land off-board (rank 10).
+    let target = sq(4, 7);
+
+    // Horse at target + (1, 2) = (5, 9); its leg toward the target is (5, 8).
+    let mut b = Board::empty();
+    place_safe_kings(&mut b);
+    b.set_piece(sq(5, 9), Some(Piece::new(Color::Black, PieceKind::Horse)));
+    // Leg (5, 8) is empty -> the horse attacks the target.
+    assert!(
+        b.is_attacked_by(target, Color::Black),
+        "edge horse with an empty leg should attack the target"
+    );
+
+    // Now block the leg (5, 8): the horse can no longer attack (蹩马腿).
+    let mut b2 = b.clone();
+    b2.set_piece(sq(5, 8), Some(Piece::new(Color::Black, PieceKind::Pawn)));
+    assert!(
+        !b2.is_attacked_by(target, Color::Black),
+        "a blocked horse leg must stop the attack"
+    );
+}
+
+/// A horse delivering check from the edge is reported by `is_in_check`
+/// (exercises the same path as the AI search that triggered the panic).
+#[test]
+fn horse_checks_king_from_edge() {
+    let mut b = Board::empty();
+    // Black king at (4, 9); red horse at (5, 7) attacks (4, 9) with leg (5, 8).
+    b.set_piece(sq(4, 9), Some(Piece::new(Color::Black, PieceKind::King)));
+    b.set_piece(sq(0, 0), Some(Piece::new(Color::Red, PieceKind::King)));
+    b.set_piece(sq(5, 7), Some(Piece::new(Color::Red, PieceKind::Horse)));
+    assert!(b.is_in_check(Color::Black), "edge horse should give check");
+}

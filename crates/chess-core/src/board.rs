@@ -350,24 +350,30 @@ impl Board {
         // Horse attackers: a horse attacks `target` if it sits a knight-jump
         // away AND its leg (the square adjacent to the horse toward target) is
         // empty.
+        // ((horse offset from target), (leg offset from the horse toward the
+        // target)). The leg is the orthogonal square the horse steps over along
+        // its major (±2) axis; it must be empty for the horse to attack (蹩马腿).
         const HORSE_FROM: [((i8, i8), (i8, i8)); 8] = [
-            ((1, 2), (0, 1)),
-            ((-1, 2), (0, 1)),
-            ((1, -2), (0, -1)),
-            ((-1, -2), (0, -1)),
-            ((2, 1), (1, 0)),
-            ((2, -1), (1, 0)),
-            ((-2, 1), (-1, 0)),
-            ((-2, -1), (-1, 0)),
+            ((1, 2), (0, -1)),
+            ((-1, 2), (0, -1)),
+            ((1, -2), (0, 1)),
+            ((-1, -2), (0, 1)),
+            ((2, 1), (-1, 0)),
+            ((2, -1), (-1, 0)),
+            ((-2, 1), (1, 0)),
+            ((-2, -1), (1, 0)),
         ];
         for ((hf, hr), (lf, lr)) in HORSE_FROM {
             if let Some(from) = Square::try_new(tf + hf, tr + hr) {
                 if let Some(p) = self.squares[from.index()] {
                     if p.color == by && p.kind == PieceKind::Horse {
-                        // leg is adjacent to the horse, toward the target.
-                        let leg = Square::try_new(tf + hf + lf, tr + hr + lr).unwrap();
-                        if self.squares[leg.index()].is_none() {
-                            return true;
+                        // Leg is adjacent to the horse, toward the target; it is
+                        // always on-board (it lies between two on-board squares),
+                        // but guard defensively rather than unwrap.
+                        if let Some(leg) = Square::try_new(tf + hf + lf, tr + hr + lr) {
+                            if self.squares[leg.index()].is_none() {
+                                return true;
+                            }
                         }
                     }
                 }
