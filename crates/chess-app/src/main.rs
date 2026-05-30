@@ -37,17 +37,58 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
+/// Resolve the directory that holds the bundled `assets/` folder.
+///
+/// Order of preference (so the game runs "out of the box" both in development
+/// and from a packaged release on any platform):
+/// 1. `assets/` sitting next to the executable (the distribution layout).
+/// 2. the workspace `assets/` baked in at compile time (development).
+/// 3. plain `assets` relative to the current working directory.
+fn resolve_asset_root() -> String {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("assets");
+            if candidate.is_dir() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
+    if std::path::Path::new(workspace).is_dir() {
+        return workspace.to_string();
+    }
+    "assets".to_string()
+}
+
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "中国象棋 Xiangqi".into(),
-                resolution: bevy::window::WindowResolution::new(1280, 800),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "中国象棋 Xiangqi".into(),
+                    resolution: bevy::window::WindowResolution::new(1280, 800),
+                    ..default()
+                }),
+                ..default()
+            })
+            .set(bevy::asset::AssetPlugin {
+                file_path: resolve_asset_root(),
                 ..default()
             }),
-            ..default()
-        }))
-        .init_state::<AppState>()
+    );
+
+    // Load the bundled CJK fonts up front (order-independent) so the very first
+    // menu/board UI renders Chinese text immediately.
+    {
+        let assets = app.world().resource::<AssetServer>().clone();
+        app.insert_resource(app_state::UiFonts {
+            regular: assets.load("fonts/cjk.otf"),
+            bold: assets.load("fonts/cjk-bold.otf"),
+        });
+    }
+
+    app.init_state::<AppState>()
         .init_resource::<CoreGame>()
         .init_resource::<Selection>()
         .init_resource::<AiSettings>()

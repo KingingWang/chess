@@ -116,3 +116,11 @@ pub fn world_to_square(pos: Vec2) -> Option<chess_core::Square> {
         None
     }
 }
+
+/// Bundled CJK fonts (original artwork-free; OFL/Apache licensed) used for all
+/// on-screen text so piece glyphs (帅/将…) and UI render correctly.
+#[derive(Resource, Clone)]
+pub struct UiFonts {
+    pub regular: Handle<Font>,
+    pub bold: Handle<Font>,
+}

@@ -4,14 +4,21 @@ use bevy::prelude::*;
 use chess_core::{Color as ChessColor, GameResult, WinReason};
 use chess_net::Role;
 
-use crate::app_state::{AppState, CoreGame, GameMode};
+use crate::app_state::{AppState, CoreGame, GameMode, UiFonts};
 use crate::board_view::RenderDirty;
 use crate::net_bridge::{start_net, NetCommand, NetLink};
 
-const PANEL: Color = Color::srgb(0.12, 0.12, 0.14);
-const BTN: Color = Color::srgb(0.20, 0.22, 0.28);
-const BTN_HOVER: Color = Color::srgb(0.28, 0.32, 0.42);
-const TEXT: Color = Color::srgb(0.92, 0.92, 0.95);
+// --- 国风 palette ---------------------------------------------------------
+const BACKDROP: Color = Color::srgb(0.10, 0.08, 0.09); // deep lacquer behind card
+const CARD: Color = Color::srgb(0.16, 0.13, 0.13);
+const CARD_BORDER: Color = Color::srgb(0.62, 0.45, 0.22); // antique gold
+const BTN: Color = Color::srgb(0.55, 0.16, 0.13); // cinnabar red
+const BTN_HOVER: Color = Color::srgb(0.72, 0.22, 0.17);
+const BTN_BORDER: Color = Color::srgb(0.78, 0.62, 0.32);
+const TITLE: Color = Color::srgb(0.93, 0.84, 0.55); // gold ink
+const SUBTITLE: Color = Color::srgb(0.78, 0.70, 0.55);
+const TEXT: Color = Color::srgb(0.96, 0.93, 0.86);
+const PANEL_BG: Color = Color::srgba(0.13, 0.10, 0.10, 0.92);
 
 fn lan_addr_host() -> String {
     std::env::var("CHESS_BIND").unwrap_or_else(|_| "0.0.0.0:9696".to_string())
@@ -28,7 +35,7 @@ pub struct MenuRoot;
 #[derive(Component, Clone, Copy)]
 pub struct MenuButton(pub GameMode);
 
-pub fn setup_menu(mut commands: Commands) {
+pub fn setup_menu(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn((
             Node {
@@ -37,54 +44,90 @@ pub fn setup_menu(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(14.0),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            BackgroundColor(BACKDROP),
             MenuRoot,
         ))
         .with_children(|root| {
+            // Centered ornamented card.
             root.spawn((
-                Text::new("中国象棋  Xiangqi"),
-                TextFont {
-                    font_size: 44.0,
-                    ..default()
-                },
-                TextColor(TEXT),
                 Node {
-                    margin: UiRect::bottom(Val::Px(24.0)),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(56.0), Val::Px(44.0)),
+                    row_gap: Val::Px(14.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(18.0)),
                     ..default()
                 },
-            ));
-            for (label, mode) in [
-                ("Local 2-Player", GameMode::LocalPvp),
-                ("Vs Computer (AI)", GameMode::VsAi),
-                ("Host LAN Game", GameMode::LanHost),
-                ("Join LAN Game", GameMode::LanJoin),
-            ] {
-                root.spawn((
-                    Button,
-                    MenuButton(mode),
-                    Node {
-                        width: Val::Px(280.0),
-                        height: Val::Px(52.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
+                BackgroundColor(CARD),
+                BorderColor::all(CARD_BORDER),
+                BoxShadow::new(
+                    Color::srgba(0.0, 0.0, 0.0, 0.55),
+                    Val::Px(0.0),
+                    Val::Px(10.0),
+                    Val::Px(6.0),
+                    Val::Px(34.0),
+                ),
+            ))
+            .with_children(|card| {
+                card.spawn((
+                    Text::new("中 国 象 棋"),
+                    TextFont {
+                        font: fonts.bold.clone(),
+                        font_size: 56.0,
                         ..default()
                     },
-                    BackgroundColor(BTN),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new(label),
-                        TextFont {
-                            font_size: 22.0,
+                    TextColor(TITLE),
+                ));
+                card.spawn((
+                    Text::new("— 国风对弈 · 楚汉相争 —"),
+                    TextFont {
+                        font: fonts.regular.clone(),
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(SUBTITLE),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(22.0)),
+                        ..default()
+                    },
+                ));
+                for (label, mode) in [
+                    ("本地双人对弈", GameMode::LocalPvp),
+                    ("人机对战", GameMode::VsAi),
+                    ("创建联机房间", GameMode::LanHost),
+                    ("加入联机房间", GameMode::LanJoin),
+                ] {
+                    card.spawn((
+                        Button,
+                        MenuButton(mode),
+                        Node {
+                            width: Val::Px(300.0),
+                            height: Val::Px(56.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.5)),
+                            border_radius: BorderRadius::all(Val::Px(12.0)),
                             ..default()
                         },
-                        TextColor(TEXT),
-                    ));
-                });
-            }
+                        BackgroundColor(BTN),
+                        BorderColor::all(BTN_BORDER),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(label),
+                            TextFont {
+                                font: fonts.bold.clone(),
+                                font_size: 24.0,
+                                ..default()
+                            },
+                            TextColor(TEXT),
+                        ));
+                    });
+                }
+            });
         });
 }
 
@@ -125,7 +168,6 @@ pub fn menu_interaction(
                             ChessColor::Red,
                             "guest".into(),
                         );
-                        // local_color updated when NetEvent::Connected arrives.
                         commands.insert_resource(link);
                     }
                     _ => {}
@@ -160,7 +202,7 @@ pub enum HudAction {
     BackToMenu,
 }
 
-pub fn setup_hud(mut commands: Commands) {
+pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
     commands
         .spawn((
             Node {
@@ -175,49 +217,73 @@ pub fn setup_hud(mut commands: Commands) {
             // Left side panel.
             root.spawn((
                 Node {
-                    width: Val::Px(220.0),
+                    width: Val::Px(232.0),
                     height: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(14.0)),
-                    row_gap: Val::Px(10.0),
+                    padding: UiRect::all(Val::Px(18.0)),
+                    row_gap: Val::Px(12.0),
+                    border: UiRect::right(Val::Px(2.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.10, 0.10, 0.12, 0.85)),
+                BackgroundColor(PANEL_BG),
+                BorderColor::all(CARD_BORDER),
             ))
             .with_children(|panel| {
                 panel.spawn((
+                    Text::new("象棋对弈"),
+                    TextFont {
+                        font: fonts.bold.clone(),
+                        font_size: 26.0,
+                        ..default()
+                    },
+                    TextColor(TITLE),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(6.0)),
+                        ..default()
+                    },
+                ));
+                panel.spawn((
                     Text::new("..."),
                     TextFont {
-                        font_size: 20.0,
+                        font: fonts.regular.clone(),
+                        font_size: 22.0,
                         ..default()
                     },
                     TextColor(TEXT),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(10.0)),
+                        ..default()
+                    },
                     StatusText,
                 ));
                 for (label, action) in [
-                    ("New Game", HudAction::NewGame),
-                    ("Resign", HudAction::Resign),
-                    ("Offer Draw", HudAction::OfferDraw),
-                    ("Main Menu", HudAction::BackToMenu),
+                    ("新 对 局", HudAction::NewGame),
+                    ("认 输", HudAction::Resign),
+                    ("求 和", HudAction::OfferDraw),
+                    ("返回主菜单", HudAction::BackToMenu),
                 ] {
                     panel
                         .spawn((
                             Button,
                             action,
                             Node {
-                                width: Val::Px(180.0),
-                                height: Val::Px(40.0),
+                                width: Val::Px(196.0),
+                                height: Val::Px(44.0),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.5)),
+                                border_radius: BorderRadius::all(Val::Px(10.0)),
                                 ..default()
                             },
                             BackgroundColor(BTN),
+                            BorderColor::all(BTN_BORDER),
                         ))
                         .with_children(|b| {
                             b.spawn((
                                 Text::new(label),
                                 TextFont {
-                                    font_size: 18.0,
+                                    font: fonts.bold.clone(),
+                                    font_size: 20.0,
                                     ..default()
                                 },
                                 TextColor(TEXT),
@@ -236,30 +302,34 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
         match result {
             GameResult::Win { winner, reason } => {
                 let side = match winner {
-                    ChessColor::Red => "Red",
-                    ChessColor::Black => "Black",
+                    ChessColor::Red => "红方",
+                    ChessColor::Black => "黑方",
                 };
                 let why = match reason {
-                    WinReason::Checkmate => "checkmate",
-                    WinReason::Stalemate => "stalemate",
-                    WinReason::Resignation => "resignation",
-                    WinReason::PerpetualCheck => "perpetual check",
+                    WinReason::Checkmate => "将死",
+                    WinReason::Stalemate => "困毙",
+                    WinReason::Resignation => "认输",
+                    WinReason::PerpetualCheck => "长将判负",
                 };
-                format!("{side} wins\n({why})")
+                format!("{side}胜\n（{why}）")
             }
-            GameResult::Draw(_) => "Draw".to_string(),
+            GameResult::Draw(_) => "和棋".to_string(),
         }
     } else {
         let side = match core.game.side_to_move() {
-            ChessColor::Red => "Red",
-            ChessColor::Black => "Black",
+            ChessColor::Red => "红方",
+            ChessColor::Black => "黑方",
         };
         let turn = if core.local_to_move() {
-            "your move"
+            "轮到你走棋"
         } else {
-            "waiting..."
+            "等待对手…"
         };
-        format!("{side} to move\n({turn})")
+        let mut s = format!("{side}行棋\n{turn}");
+        if core.draw_offer_from_peer {
+            s.push_str("\n对方提议和棋");
+        }
+        s
     };
     **text = status;
 }
@@ -292,7 +362,6 @@ pub fn hud_interaction(
                 HudAction::OfferDraw => {
                     if let Some(net) = &net {
                         if core.draw_offer_from_peer {
-                            // Accept the peer's pending offer.
                             let _ = net.out.send(NetCommand::DrawResponse(true));
                             core.draw_offer_from_peer = false;
                             core.game.agree_draw();
@@ -301,7 +370,6 @@ pub fn hud_interaction(
                             let _ = net.out.send(NetCommand::DrawOffer);
                         }
                     } else {
-                        // Local game: accept immediately.
                         core.game.agree_draw();
                         dirty.0 = true;
                     }
