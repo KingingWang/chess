@@ -61,6 +61,9 @@ pub struct CoreGame {
     pub room_code: Option<String>,
     /// True while a networked game is still waiting for the peer to connect.
     pub awaiting_peer: bool,
+    /// True once a networked session has actually connected to the peer.
+    /// Used to distinguish a failed connect (→ back to menu) from a mid-game drop.
+    pub connected: bool,
 }
 
 impl Default for CoreGame {
@@ -72,6 +75,7 @@ impl Default for CoreGame {
             draw_offer_from_peer: false,
             room_code: None,
             awaiting_peer: false,
+            connected: false,
         }
     }
 }

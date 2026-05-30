@@ -14,6 +14,7 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::ButtonState;
 use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
 use chess_core::Color as ChessColor;
 use chess_net::Role;
 
@@ -174,8 +175,8 @@ pub fn manage_lan_dialog(
 
 fn transport_label(t: Transport) -> &'static str {
     match t {
-        Transport::Lan => "联机方式：局域网 ▸",
-        Transport::Server => "联机方式：服务器 ▸",
+        Transport::Lan => "联机方式：局域网（点此切换）",
+        Transport::Server => "联机方式：服务器（点此切换）",
     }
 }
 
@@ -197,6 +198,7 @@ fn build_dialog(commands: &mut Commands, fonts: &UiFonts, dialog: &LanDialog) {
             },
             BackgroundColor(OVERLAY),
             GlobalZIndex(100),
+            FocusPolicy::Block,
             LanDialogRoot,
         ))
         .with_children(|root| {
@@ -669,6 +671,7 @@ fn start_game(core: &mut CoreGame, next: &mut NextState<AppState>, setup: GameSe
     core.local_color = ChessColor::Red; // guest gets corrected on Connected
     core.room_code = setup.room_code;
     core.awaiting_peer = false;
+    core.connected = false;
     core.draw_offer_from_peer = false;
     next.set(AppState::InGame);
 }
@@ -684,5 +687,109 @@ pub fn teardown_lan_dialog(
     dialog.focus = LanField::None;
     for e in &roots {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    use bevy::input::ButtonState;
+
+    fn key(ch: &str, code: KeyCode) -> KeyboardInput {
+        KeyboardInput {
+            key_code: code,
+            logical_key: Key::Character(ch.into()),
+            state: ButtonState::Pressed,
+            text: Some(ch.into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    #[test]
+    fn keyboard_types_into_default_focused_field() {
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>();
+        app.add_systems(Update, lan_dialog_keyboard);
+
+        let mut d = LanDialog::default();
+        d.open_for(true); // host + LAN => first field is Port (default "9696")
+        assert_eq!(d.focus, LanField::Port);
+        app.insert_resource(d);
+
+        app.world_mut().write_message(key("5", KeyCode::Digit5));
+        app.update();
+
+        assert_eq!(app.world().resource::<LanDialog>().port, "96965");
+    }
+
+    #[test]
+    fn clicking_a_field_button_focuses_it() {
+        let mut app = App::new();
+        app.add_systems(Update, lan_dialog_buttons);
+
+        let mut d = LanDialog::default();
+        d.open_for(false); // guest + LAN => fields Ip, Port, Password; focus = Ip
+        assert_eq!(d.focus, LanField::Ip);
+        app.insert_resource(d);
+
+        app.world_mut()
+            .spawn((Interaction::Pressed, LanFieldButton(LanField::Password)));
+        app.update();
+
+        assert_eq!(app.world().resource::<LanDialog>().focus, LanField::Password);
+    }
+
+    #[test]
+    fn dialog_root_is_stable_across_frames() {
+        let mut app = App::new();
+        app.insert_resource(UiFonts {
+            regular: Handle::default(),
+            bold: Handle::default(),
+        });
+        let mut d = LanDialog::default();
+        d.open_for(true);
+        app.insert_resource(d);
+        app.add_systems(Update, manage_lan_dialog);
+
+        app.update(); // first build
+        let root1 = app
+            .world_mut()
+            .query_filtered::<Entity, With<LanDialogRoot>>()
+            .iter(app.world())
+            .next()
+            .expect("dialog root spawned");
+
+        app.update();
+        app.update();
+
+        let roots: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<LanDialogRoot>>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(roots.len(), 1, "exactly one dialog root expected");
+        assert_eq!(
+            roots[0], root1,
+            "dialog must not be despawned/rebuilt every frame"
+        );
+    }
+
+    #[test]
+    fn typing_into_password_after_focus() {
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>();
+        app.add_systems(Update, lan_dialog_keyboard);
+
+        let mut d = LanDialog::default();
+        d.open_for(true);
+        d.focus = LanField::Password;
+        app.insert_resource(d);
+
+        app.world_mut().write_message(key("a", KeyCode::KeyA));
+        app.update();
+
+        assert_eq!(app.world().resource::<LanDialog>().password, "a");
     }
 }
