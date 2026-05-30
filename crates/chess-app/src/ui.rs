@@ -2,11 +2,11 @@
 
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, GameResult, WinReason};
-use chess_net::Role;
 
 use crate::app_state::{AppState, CoreGame, GameMode, UiFonts};
 use crate::board_view::RenderDirty;
-use crate::net_bridge::{start_net, NetCommand, NetLink};
+use crate::lan_dialog::LanDialog;
+use crate::net_bridge::{NetCommand, NetLink};
 
 // --- 国风 palette ---------------------------------------------------------
 const BACKDROP: Color = Color::srgb(0.10, 0.08, 0.09); // deep lacquer behind card
@@ -19,13 +19,6 @@ const TITLE: Color = Color::srgb(0.93, 0.84, 0.55); // gold ink
 const SUBTITLE: Color = Color::srgb(0.78, 0.70, 0.55);
 const TEXT: Color = Color::srgb(0.96, 0.93, 0.86);
 const PANEL_BG: Color = Color::srgba(0.13, 0.10, 0.10, 0.92);
-
-fn lan_addr_host() -> String {
-    std::env::var("CHESS_BIND").unwrap_or_else(|_| "0.0.0.0:9696".to_string())
-}
-fn lan_addr_join() -> String {
-    std::env::var("CHESS_ADDR").unwrap_or_else(|_| "127.0.0.1:9696".to_string())
-}
 
 // --- Menu ----------------------------------------------------------------
 
@@ -138,42 +131,22 @@ pub fn menu_interaction(
     >,
     mut core: ResMut<CoreGame>,
     mut next: ResMut<NextState<AppState>>,
-    runtime: Res<crate::async_runtime::AsyncRuntime>,
-    mut commands: Commands,
+    mut dialog: ResMut<LanDialog>,
 ) {
     for (interaction, btn, mut bg) in &mut interactions {
         match *interaction {
-            Interaction::Pressed => {
-                core.restart();
-                core.mode = btn.0;
-                core.local_color = ChessColor::Red;
-
-                match btn.0 {
-                    GameMode::LanHost => {
-                        let link = start_net(
-                            &runtime.0,
-                            Role::Host,
-                            lan_addr_host(),
-                            ChessColor::Red,
-                            "host".into(),
-                        );
-                        core.local_color = ChessColor::Red;
-                        commands.insert_resource(link);
-                    }
-                    GameMode::LanJoin => {
-                        let link = start_net(
-                            &runtime.0,
-                            Role::Guest,
-                            lan_addr_join(),
-                            ChessColor::Red,
-                            "guest".into(),
-                        );
-                        commands.insert_resource(link);
-                    }
-                    _ => {}
+            Interaction::Pressed => match btn.0 {
+                // LAN modes open the setup dialog (port / IP / password) first.
+                GameMode::LanHost => dialog.open_for(true),
+                GameMode::LanJoin => dialog.open_for(false),
+                // Local / AI start immediately.
+                other => {
+                    core.restart();
+                    core.mode = other;
+                    core.local_color = ChessColor::Red;
+                    next.set(AppState::InGame);
                 }
-                next.set(AppState::InGame);
-            }
+            },
             Interaction::Hovered => *bg = BackgroundColor(BTN_HOVER),
             Interaction::None => *bg = BackgroundColor(BTN),
         }

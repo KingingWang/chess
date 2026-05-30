@@ -45,14 +45,15 @@ pub fn start_net(
     addr: String,
     host_color: ChessColor,
     name: String,
+    password: String,
 ) -> NetLink {
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<NetCommand>();
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
     runtime.spawn(async move {
         let session = match role {
-            Role::Host => Session::host(addr.as_str(), host_color, &name).await,
-            Role::Guest => Session::join(addr.as_str(), &name).await,
+            Role::Host => Session::host(addr.as_str(), host_color, &name, &password).await,
+            Role::Guest => Session::join(addr.as_str(), &name, &password).await,
         };
         let mut session = match session {
             Ok(s) => s,

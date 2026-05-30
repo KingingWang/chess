@@ -11,10 +11,12 @@
 //! intentionally out of scope per the spec.
 
 pub mod connection;
+pub mod crypto;
 pub mod protocol;
 pub mod session;
 
 pub use connection::{connect, Connection, NetError, Server};
+pub use crypto::Cipher;
 pub use protocol::{Message, WireMove, PROTOCOL_VERSION};
 pub use session::{HandshakeError, Role, Session};
 
@@ -31,7 +33,7 @@ mod tests {
 
         // Host side runs concurrently with the guest.
         let host = tokio::spawn(async move {
-            let mut conn = server.accept_one().await.unwrap();
+            let mut conn = server.accept_one("pw").await.unwrap();
             conn.send(&Message::Hello {
                 version: PROTOCOL_VERSION,
                 your_color: Color::Black,
@@ -57,7 +59,7 @@ mod tests {
         });
 
         // Guest side.
-        let mut session = Session::join(addr, "guest").await.unwrap();
+        let mut session = Session::join(addr, "guest", "pw").await.unwrap();
         assert_eq!(session.my_color, Color::Black);
 
         let mut game = Game::new();
@@ -78,6 +80,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn join_with_wrong_password_fails_handshake() {
+        let server = Server::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+        let host = tokio::spawn(async move {
+            // Host seals its Hello with the correct password.
+            let mut conn = server.accept_one("right-pw").await.unwrap();
+            let _ = conn
+                .send(&Message::Hello {
+                    version: PROTOCOL_VERSION,
+                    your_color: Color::Black,
+                    name: "host".into(),
+                })
+                .await;
+        });
+
+        // The guest uses the WRONG password, so it cannot decrypt the very
+        // first handshake frame and the join fails.
+        let res = Session::join(addr, "guest", "wrong-pw").await;
+        assert!(res.is_err(), "a wrong password must fail the handshake");
+        let _ = host.await;
+    }
+
+    #[tokio::test]
     async fn session_host_join_assigns_colors() {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let host = tokio::spawn(async move {
@@ -85,7 +110,7 @@ mod tests {
             let server = Server::bind("127.0.0.1:0").await.unwrap();
             let addr = server.local_addr().unwrap();
             tx.send(addr).unwrap();
-            let mut conn = server.accept_one().await.unwrap();
+            let mut conn = server.accept_one("pw").await.unwrap();
             conn.send(&Message::Hello {
                 version: PROTOCOL_VERSION,
                 your_color: Color::Black,
@@ -99,7 +124,7 @@ mod tests {
             }
         });
         let addr = rx.await.unwrap();
-        let session = Session::join(addr, "guest").await.unwrap();
+        let session = Session::join(addr, "guest", "pw").await.unwrap();
         assert_eq!(session.my_color, Color::Black);
         assert_eq!(host.await.unwrap(), Color::Red);
     }

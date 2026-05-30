@@ -22,6 +22,7 @@ mod app_state;
 mod async_runtime;
 mod board_view;
 mod input;
+mod lan_dialog;
 mod moves;
 mod net_bridge;
 mod ui;
@@ -93,16 +94,28 @@ fn main() {
         .init_resource::<Selection>()
         .init_resource::<AiSettings>()
         .init_resource::<RenderDirty>()
+        .init_resource::<lan_dialog::LanDialog>()
         .init_resource::<ai_bridge::AiTask>()
         .insert_resource(AsyncRuntime::new())
         .insert_resource(ClearColor(Color::srgb(0.07, 0.07, 0.09)))
         .add_systems(Startup, setup_camera)
         // Menu state.
         .add_systems(OnEnter(AppState::Menu), ui::setup_menu)
-        .add_systems(OnExit(AppState::Menu), ui::teardown_menu)
+        .add_systems(
+            OnExit(AppState::Menu),
+            (ui::teardown_menu, lan_dialog::teardown_lan_dialog),
+        )
         .add_systems(
             Update,
-            ui::menu_interaction.run_if(in_state(AppState::Menu)),
+            (
+                ui::menu_interaction,
+                lan_dialog::manage_lan_dialog,
+                lan_dialog::lan_dialog_buttons,
+                lan_dialog::lan_dialog_keyboard,
+                lan_dialog::lan_dialog_submit,
+                lan_dialog::lan_dialog_render,
+            )
+                .run_if(in_state(AppState::Menu)),
         )
         // In-game state.
         .add_systems(

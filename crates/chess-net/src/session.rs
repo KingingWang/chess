@@ -41,9 +41,10 @@ impl Session {
         addr: impl tokio::net::ToSocketAddrs,
         host_color: Color,
         name: &str,
+        password: &str,
     ) -> Result<Session, HandshakeError> {
         let server = Server::bind(addr).await?;
-        let mut conn = server.accept_one().await?;
+        let mut conn = server.accept_one(password).await?;
 
         // Tell the guest its color.
         conn.send(&Message::Hello {
@@ -76,8 +77,9 @@ impl Session {
     pub async fn join(
         addr: impl tokio::net::ToSocketAddrs,
         name: &str,
+        password: &str,
     ) -> Result<Session, HandshakeError> {
-        let mut conn = crate::connection::connect(addr).await?;
+        let mut conn = crate::connection::connect(addr, password).await?;
 
         let my_color = match conn.recv().await? {
             Message::Hello {
