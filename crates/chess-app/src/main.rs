@@ -129,6 +129,8 @@ fn main() {
                 lan_dialog::manage_lan_dialog,
                 lan_dialog::lan_dialog_buttons,
                 lan_dialog::lan_dialog_keyboard,
+                lan_dialog::lan_dialog_ime,
+                lan_dialog::lan_dialog_sync_ime,
                 lan_dialog::lan_dialog_submit,
                 lan_dialog::lan_dialog_render,
             )

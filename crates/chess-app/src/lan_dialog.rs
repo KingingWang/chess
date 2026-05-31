@@ -15,6 +15,7 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::ButtonState;
 use bevy::prelude::*;
 use bevy::ui::FocusPolicy;
+use bevy::window::Ime;
 use chess_core::Color as ChessColor;
 use chess_net::Role;
 
@@ -121,6 +122,22 @@ impl LanDialog {
             LanField::Room => Some(&mut self.room),
             LanField::Password => Some(&mut self.password),
             LanField::None => None,
+        }
+    }
+}
+
+impl LanDialog {
+    /// Append accepted characters of `text` into the focused field, applying the
+    /// per-field validation rules. Shared by the keyboard and IME handlers.
+    fn insert_text(&mut self, text: &str) {
+        let field = self.focus;
+        if let Some(s) = self.focused_value_mut() {
+            for ch in text.chars() {
+                let len = s.chars().count();
+                if accept_char(field, len, ch) {
+                    s.push(ch);
+                }
+            }
         }
     }
 }
@@ -474,15 +491,10 @@ pub fn lan_dialog_keyboard(
                 dialog.password.push(' ');
             }
             Key::Character(text) => {
-                let field = dialog.focus;
-                if let Some(s) = dialog.focused_value_mut() {
-                    for ch in text.chars() {
-                        let len = s.chars().count();
-                        if accept_char(field, len, ch) {
-                            s.push(ch);
-                        }
-                    }
-                }
+                // When the OS IME is active the same text also arrives via
+                // `Ime::Commit`; with `ime_enabled` set, winit suppresses these
+                // character events so there is no double entry.
+                dialog.insert_text(text.as_str());
             }
             _ => {}
         }
@@ -682,11 +694,44 @@ pub fn teardown_lan_dialog(
     mut commands: Commands,
     mut dialog: ResMut<LanDialog>,
     roots: Query<Entity, With<LanDialogRoot>>,
+    mut windows: Query<&mut Window>,
 ) {
     dialog.open = false;
     dialog.focus = LanField::None;
+    if let Ok(mut window) = windows.single_mut() {
+        window.ime_enabled = false;
+    }
     for e in &roots {
         commands.entity(e).despawn();
+    }
+}
+
+/// Insert IME-committed text (CJK, or any text when an OS IME is active) into
+/// the focused field. Complements [`lan_dialog_keyboard`], which still handles
+/// the control keys (Esc/Enter/Backspace) that arrive as `KeyboardInput`.
+pub fn lan_dialog_ime(mut dialog: ResMut<LanDialog>, mut events: MessageReader<Ime>) {
+    if !dialog.open {
+        events.clear();
+        return;
+    }
+    for ev in events.read() {
+        if let Ime::Commit { value, .. } = ev {
+            let text = value.clone();
+            dialog.insert_text(&text);
+        }
+    }
+}
+
+/// Enable the window IME only while the dialog is open. Without this, on Linux
+/// (X11/Wayland) an active system input method (fcitx/ibus/搜狗) swallows key
+/// presses and the text fields appear unresponsive. Enabling IME routes the
+/// committed text to us as [`Ime`] events instead.
+pub fn lan_dialog_sync_ime(dialog: Res<LanDialog>, mut windows: Query<&mut Window>) {
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    if window.ime_enabled != dialog.open {
+        window.ime_enabled = dialog.open;
     }
 }
 
@@ -774,6 +819,49 @@ mod tests {
             roots[0], root1,
             "dialog must not be despawned/rebuilt every frame"
         );
+    }
+
+    #[test]
+    fn ime_commit_inserts_into_focused_field() {
+        let mut app = App::new();
+        app.add_message::<Ime>();
+        app.add_systems(Update, lan_dialog_ime);
+
+        let mut d = LanDialog::default();
+        d.open_for(true);
+        d.focus = LanField::Password;
+        app.insert_resource(d);
+
+        app.world_mut().write_message(Ime::Commit {
+            window: Entity::PLACEHOLDER,
+            value: "你好".to_string(),
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<LanDialog>().password, "你好");
+    }
+
+    #[test]
+    fn ime_commit_respects_numeric_field_rules() {
+        let mut app = App::new();
+        app.add_message::<Ime>();
+        app.add_systems(Update, lan_dialog_ime);
+
+        let mut d = LanDialog::default();
+        d.open_for(false); // guest + server? no, LAN. set room manually
+        d.transport = Transport::Server;
+        d.focus = LanField::Room;
+        d.room.clear();
+        app.insert_resource(d);
+
+        // Non-digits rejected; digits accepted up to 8.
+        app.world_mut().write_message(Ime::Commit {
+            window: Entity::PLACEHOLDER,
+            value: "12ab34".to_string(),
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<LanDialog>().room, "1234");
     }
 
     #[test]
