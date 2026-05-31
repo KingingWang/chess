@@ -70,16 +70,13 @@ pub fn start_net(
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
     runtime.spawn(async move {
-        eprintln!("[netdbg] connect task started");
         let session = establish(target, host_color, &name, &password, &evt_tx).await;
         let mut session = match session {
             Some(s) => s,
             None => {
-                eprintln!("[netdbg] establish returned None -> task exiting (error already sent)");
                 return; // an error was already reported
             }
         };
-        eprintln!("[netdbg] establish OK -> sending Connected (my_color={:?})", session.my_color);
         let _ = evt_tx.send(NetEvent::Connected {
             my_color: session.my_color,
         });
@@ -142,7 +139,6 @@ async fn establish(
     match result {
         Ok(s) => Some(s),
         Err(e) => {
-            eprintln!("[netdbg] establish error: {e}");
             let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
             let _ = evt_tx.send(NetEvent::Disconnected);
             None
@@ -241,22 +237,11 @@ pub fn poll_net_events(
 
     // Drain first so we never hold the channel borrow across a state change.
     let events: Vec<NetEvent> = link.inbound.try_iter().collect();
-    if !events.is_empty() {
-        eprintln!(
-            "[netdbg] poll_net_events: {} event(s) (mode={:?} connected={} awaiting={})",
-            events.len(),
-            core.mode,
-            core.connected,
-            core.awaiting_peer
-        );
-    }
     for evt in events {
-        eprintln!("[netdbg] event = {evt:?}");
         // Any failure before we ever connected means the room could not be
         // joined/created: abort back to the menu and show why, instead of
         // sitting on an empty board forever.
         if matches!(evt, NetEvent::Error(_) | NetEvent::Disconnected) && !core.connected {
-            eprintln!("[netdbg] -> bouncing back to menu (failure before connect)");
             if let NetEvent::Error(ref e) = evt {
                 warn!(error = %e, "connection failed before established");
             }
