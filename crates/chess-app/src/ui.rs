@@ -272,9 +272,16 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
         return;
     };
     if core.awaiting_peer {
-        **text = match &core.room_code {
-            Some(room) => format!("房间号 {room}\n等待对手加入…"),
-            None => "等待对手加入…".to_string(),
+        **text = match core.mode {
+            // Host side: room is open, waiting for a friend to arrive.
+            GameMode::RelayHost => match &core.room_code {
+                Some(room) => format!("房间号 {room}\n等待对手加入…"),
+                None => "等待对手加入…".to_string(),
+            },
+            GameMode::LanHost => "等待对手加入…".to_string(),
+            // Guest side: still establishing/verifying the connection.
+            GameMode::LanJoin | GameMode::RelayJoin => "正在连接，请稍候…".to_string(),
+            _ => "正在连接，请稍候…".to_string(),
         };
         return;
     }

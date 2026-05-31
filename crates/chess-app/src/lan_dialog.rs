@@ -660,7 +660,6 @@ fn submit_server(
     };
 
     start_game(core, next, GameSetup { mode, room_code });
-    core.awaiting_peer = true;
     let link = start_net(
         &runtime.0,
         target,
@@ -682,7 +681,14 @@ fn start_game(core: &mut CoreGame, next: &mut NextState<AppState>, setup: GameSe
     core.mode = setup.mode;
     core.local_color = ChessColor::Red; // guest gets corrected on Connected
     core.room_code = setup.room_code;
-    core.awaiting_peer = false;
+    // Networked games are not playable until the peer is actually connected and
+    // the password-keyed handshake has succeeded. Stay in a "connecting / waiting"
+    // state (board input disabled) until a `Connected` event arrives; a failure
+    // bounces back to the menu with an error instead of looking joined.
+    core.awaiting_peer = matches!(
+        setup.mode,
+        GameMode::LanHost | GameMode::LanJoin | GameMode::RelayHost | GameMode::RelayJoin
+    );
     core.connected = false;
     core.draw_offer_from_peer = false;
     next.set(AppState::InGame);

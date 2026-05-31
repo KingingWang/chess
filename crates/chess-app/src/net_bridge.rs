@@ -97,27 +97,40 @@ async fn establish(
     password: &str,
     evt_tx: &Sender<NetEvent>,
 ) -> Option<Session> {
+    use tokio::time::{timeout, Duration};
+    // A *joining* client (LAN guest / relay guest) should reach the host quickly;
+    // if it cannot, fail fast instead of looking "connected" forever. A *host*
+    // (LAN host / relay host) legitimately waits an unbounded time for a friend
+    // to arrive, so its accept/await phase is never timed out.
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+
     let result = match target {
         NetTarget::Lan { role, addr } => match role {
             Role::Host => Session::host(addr.as_str(), host_color, name, password).await,
-            Role::Guest => Session::join(addr.as_str(), name, password).await,
+            Role::Guest => timeout(CONNECT_TIMEOUT, Session::join(addr.as_str(), name, password))
+                .await
+                .unwrap_or(Err(chess_net::HandshakeError::Timeout)),
         },
         NetTarget::RelayHost { cfg } => {
             // Two phases: create (learn the room number to share), then wait
-            // for the guest, then run the color-assignment handshake.
-            match Session::relay_create(&cfg, password).await {
-                Ok(pending) => {
+            // for the guest, then run the color-assignment handshake. Only the
+            // initial create (server round-trip) is time-bounded.
+            match timeout(CONNECT_TIMEOUT, Session::relay_create(&cfg, password)).await {
+                Ok(Ok(pending)) => {
                     let _ = evt_tx.send(NetEvent::RoomCreated(pending.room.clone()));
                     match pending.await_guest().await {
                         Ok(conn) => Session::handshake_as_host(conn, host_color, name).await,
                         Err(e) => Err(e.into()),
                     }
                 }
-                Err(e) => Err(e),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(chess_net::HandshakeError::Timeout),
             }
         }
         NetTarget::RelayJoin { cfg, room } => {
-            Session::join_relay(&cfg, &room, name, password).await
+            timeout(CONNECT_TIMEOUT, Session::join_relay(&cfg, &room, name, password))
+                .await
+                .unwrap_or(Err(chess_net::HandshakeError::Timeout))
         }
     };
 
@@ -330,6 +343,28 @@ mod tests {
             NextState::Pending(s) => assert_eq!(*s, AppState::Menu),
             _ => panic!("expected a pending transition back to the menu"),
         }
+    }
+
+    #[test]
+    fn connected_event_activates_game_and_assigns_color() {
+        let mut app = base_app();
+        let core = CoreGame {
+            mode: GameMode::RelayJoin,
+            awaiting_peer: true,
+            connected: false,
+            ..Default::default()
+        };
+        app.insert_resource(core);
+        app.insert_resource(link_with(NetEvent::Connected {
+            my_color: ChessColor::Black,
+        }));
+
+        app.update();
+
+        let core = app.world().resource::<CoreGame>();
+        assert!(!core.awaiting_peer, "a connected game must stop waiting");
+        assert!(core.connected, "connected flag must be set");
+        assert_eq!(core.local_color, ChessColor::Black, "color comes from peer");
     }
 
     #[test]

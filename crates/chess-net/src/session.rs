@@ -39,6 +39,8 @@ pub enum HandshakeError {
     Version { local: u32, remote: u32 },
     #[error("unexpected message during handshake: {0:?}")]
     Unexpected(Message),
+    #[error("timed out while connecting")]
+    Timeout,
 }
 
 impl Session {

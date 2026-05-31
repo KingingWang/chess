@@ -21,6 +21,10 @@ pub fn handle_click(
     if !buttons.just_pressed(MouseButton::Left) {
         return;
     }
+    // Block board interaction until a networked game is actually connected.
+    if core.awaiting_peer {
+        return;
+    }
     if core.game.is_over() || !core.local_to_move() {
         return;
     }
