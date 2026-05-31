@@ -43,6 +43,24 @@ pub enum NetError {
     Crypto,
 }
 
+/// What a single inbound poll yielded.
+///
+/// Game-data frames carry an end-to-end-encrypted [`Message`]; relay-only
+/// control frames are exposed as their own variants so the host task can
+/// react to a peer joining or leaving without tearing down the WebSocket.
+#[derive(Debug)]
+pub enum InboundEvent {
+    /// A normal end-to-end-encrypted [`Message`] from the peer.
+    Message(Message),
+    /// Relay control: a new peer has joined the room and the next handshake
+    /// should run. Never produced on a LAN (TCP) connection.
+    PeerJoined,
+    /// Relay control: the previously connected peer has disconnected. The
+    /// caller may keep the connection alive and wait for the next
+    /// [`InboundEvent::PeerJoined`].
+    PeerLeft,
+}
+
 /// The underlying framed byte transport beneath the AEAD layer.
 enum Wire {
     Tcp {
@@ -73,9 +91,10 @@ impl Wire {
         }
     }
 
-    /// Receive the next sealed frame, blocking until one arrives or the peer
-    /// closes the connection.
-    async fn recv_frame(&mut self) -> Result<Vec<u8>, NetError> {
+    /// Receive the next "raw" inbound: either a sealed binary frame or, on a
+    /// relay WebSocket, a plaintext control text frame. LAN TCP always yields
+    /// a binary frame.
+    async fn recv_inbound(&mut self) -> Result<WireInbound, NetError> {
         match self {
             Wire::Tcp { reader, buf, .. } => {
                 buf.clear();
@@ -83,14 +102,21 @@ impl Wire {
                 if n == 0 {
                     return Err(NetError::Closed);
                 }
-                B64.decode(buf.trim_end().as_bytes())
-                    .map_err(|_| NetError::Crypto)
+                let bytes = B64
+                    .decode(buf.trim_end().as_bytes())
+                    .map_err(|_| NetError::Crypto)?;
+                Ok(WireInbound::Frame(bytes))
             }
             Wire::Ws(ws) => loop {
                 match ws.next().await {
-                    Some(Ok(m)) if m.is_binary() => return Ok(m.into_data().to_vec()),
+                    Some(Ok(m)) if m.is_binary() => {
+                        return Ok(WireInbound::Frame(m.into_data().to_vec()))
+                    }
+                    Some(Ok(m)) if m.is_text() => {
+                        let txt = m.into_text().map_err(|_| NetError::Closed)?;
+                        return Ok(WireInbound::Text(txt.to_string()));
+                    }
                     Some(Ok(m)) if m.is_close() => return Err(NetError::Closed),
-                    // Ignore ping/pong/text keepalives and keep waiting.
                     Some(Ok(_)) => continue,
                     Some(Err(_)) => return Err(NetError::Closed),
                     None => return Err(NetError::Closed),
@@ -98,6 +124,14 @@ impl Wire {
             },
         }
     }
+}
+
+/// Output of [`Wire::recv_inbound`], private to this module.
+enum WireInbound {
+    /// A sealed binary frame ready to be decrypted into a [`Message`].
+    Frame(Vec<u8>),
+    /// A plaintext text frame (only ever produced by the relay control plane).
+    Text(String),
 }
 
 /// A bidirectional, message-framed, end-to-end encrypted connection to one peer.
@@ -129,11 +163,38 @@ impl Connection {
     }
 
     /// Receive the next message, blocking until one arrives or the peer closes.
+    ///
+    /// Relay control frames (peer join/leave) are silently skipped here; use
+    /// [`Connection::recv_event`] to observe them instead.
     pub async fn recv(&mut self) -> Result<Message, NetError> {
-        let sealed = self.wire.recv_frame().await?;
-        let plain = self.cipher.open(&sealed).ok_or(NetError::Crypto)?;
-        let line = std::str::from_utf8(&plain).map_err(|_| NetError::Crypto)?;
-        Ok(Message::from_line(line)?)
+        loop {
+            match self.recv_event().await? {
+                InboundEvent::Message(m) => return Ok(m),
+                InboundEvent::PeerJoined | InboundEvent::PeerLeft => continue,
+            }
+        }
+    }
+
+    /// Receive the next inbound, including relay control signals. On a LAN
+    /// (TCP) connection only [`InboundEvent::Message`] is ever produced.
+    pub async fn recv_event(&mut self) -> Result<InboundEvent, NetError> {
+        loop {
+            match self.wire.recv_inbound().await? {
+                WireInbound::Frame(sealed) => {
+                    let plain = self.cipher.open(&sealed).ok_or(NetError::Crypto)?;
+                    let line = std::str::from_utf8(&plain).map_err(|_| NetError::Crypto)?;
+                    return Ok(InboundEvent::Message(Message::from_line(line)?));
+                }
+                WireInbound::Text(txt) => {
+                    use crate::relay::ControlMsg;
+                    match serde_json::from_str::<ControlMsg>(&txt) {
+                        Ok(ControlMsg::PeerJoined) => return Ok(InboundEvent::PeerJoined),
+                        Ok(ControlMsg::PeerLeft) => return Ok(InboundEvent::PeerLeft),
+                        Ok(_) | Err(_) => continue,
+                    }
+                }
+            }
+        }
     }
 }
 

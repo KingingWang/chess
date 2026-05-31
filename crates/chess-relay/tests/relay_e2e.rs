@@ -151,3 +151,121 @@ async fn joining_unknown_room_is_rejected() {
     let res = Session::join_relay(&cfg, "00000001", "guest", "pw").await;
     assert!(res.is_err(), "joining a non-existent room must fail");
 }
+
+/// Guest #1 connects, plays a move, drops; guest #2 then joins the SAME room
+/// with the SAME password. The relay must keep the room alive across the
+/// disconnect and the host must be able to continue serving moves to the new
+/// guest after a fresh handshake.
+#[tokio::test]
+async fn room_survives_guest_reconnect() {
+    let port = start_server().await;
+    let cfg = client_cfg(port);
+    let (room_tx, room_rx) = oneshot::channel::<String>();
+
+    let host_cfg = cfg.clone();
+    let host = tokio::spawn(async move {
+        let pending = Session::relay_create(&host_cfg, "pw").await.unwrap();
+        room_tx.send(pending.room.clone()).unwrap();
+
+        // First guest.
+        let mut conn = pending.await_guest().await.unwrap();
+        chess_net::host_handshake_on(&mut conn, Color::Red, "host")
+            .await
+            .unwrap();
+
+        // Exchange one move with guest #1, then notice they leave.
+        let mv = Move::from_iccs("h2e2").unwrap();
+        conn.send(&chess_net::Message::Move { mv: mv.into() })
+            .await
+            .unwrap();
+        // Drain until the relay tells us the guest is gone.
+        loop {
+            match conn.recv_event().await.unwrap() {
+                chess_net::InboundEvent::PeerLeft => break,
+                chess_net::InboundEvent::Message(_) => continue,
+                chess_net::InboundEvent::PeerJoined => continue,
+            }
+        }
+
+        // Second guest joins on the same room.
+        chess_net::wait_for_peer_joined(&mut conn).await.unwrap();
+        chess_net::host_handshake_on(&mut conn, Color::Red, "host")
+            .await
+            .unwrap();
+        // Resync (the second guest needs the host's current position).
+        let mut game = Game::new();
+        game.make_move(mv).unwrap();
+        conn.send(&chess_net::Message::Sync {
+            game: Box::new(game.clone()),
+        })
+        .await
+        .unwrap();
+        // Receive guest #2's reply move.
+        match conn.recv().await.unwrap() {
+            Message::Move { mv } => {
+                let m = mv.parse().unwrap();
+                assert!(game.make_move(m).is_ok(), "guest #2 move must be legal");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    });
+
+    let guest1_cfg = cfg.clone();
+    let guest1 = tokio::spawn(async move {
+        let room = room_rx.await.unwrap();
+        let mut session = Session::join_relay(&guest1_cfg, &room, "g1", "pw")
+            .await
+            .unwrap();
+        // Receive the host's first move, then disconnect immediately.
+        match session.recv().await.unwrap() {
+            Message::Move { .. } => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+        drop(session);
+        room
+    });
+    let room = guest1.await.unwrap();
+
+    // Now guest #2 joins on the same room number.
+    let guest2_cfg = cfg.clone();
+    let guest2 = tokio::spawn(async move {
+        // Reconnect can race with the relay finishing teardown of guest #1;
+        // retry briefly until the room registers as available.
+        let mut attempt = 0u32;
+        let mut session = loop {
+            match Session::join_relay(&guest2_cfg, &room, "g2", "pw").await {
+                Ok(s) => break s,
+                Err(_) if attempt < 50 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(e) => panic!("guest #2 could not rejoin room {room}: {e}"),
+            }
+        };
+
+        // Expect a Sync from the host, then play a follow-up move.
+        let mut local_game;
+        match session.recv().await.unwrap() {
+            Message::Sync { game } => {
+                local_game = *game;
+                assert_eq!(
+                    local_game.history_len(),
+                    1,
+                    "Sync must carry the host's in-progress game (one move played)"
+                );
+                assert_eq!(
+                    local_game.side_to_move(),
+                    Color::Black,
+                    "after host's h2e2 it should be Black to move"
+                );
+            }
+            other => panic!("expected Sync, got {other:?}"),
+        }
+        let reply = Move::from_iccs("b9c7").unwrap();
+        assert!(local_game.make_move(reply).is_ok());
+        session.send_move(reply).await.unwrap();
+    });
+
+    host.await.unwrap();
+    guest2.await.unwrap();
+}

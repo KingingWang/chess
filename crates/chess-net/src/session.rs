@@ -9,7 +9,7 @@
 
 use chess_core::{Color, Move};
 
-use crate::connection::{Connection, NetError, Server};
+use crate::connection::{Connection, InboundEvent, NetError, Server};
 use crate::protocol::{Message, PROTOCOL_VERSION};
 use crate::relay::{self, PendingRelayHost, RelayClientConfig};
 
@@ -41,6 +41,8 @@ pub enum HandshakeError {
     Unexpected(Message),
     #[error("timed out while connecting")]
     Timeout,
+    #[error("peer left during handshake (likely wrong password or aborted)")]
+    PeerLeft,
 }
 
 impl Session {
@@ -51,24 +53,7 @@ impl Session {
         host_color: Color,
         name: &str,
     ) -> Result<Session, HandshakeError> {
-        conn.send(&Message::Hello {
-            version: PROTOCOL_VERSION,
-            your_color: host_color.opponent(),
-            name: name.to_string(),
-        })
-        .await?;
-
-        match conn.recv().await? {
-            Message::Hello { version, .. } if version == PROTOCOL_VERSION => {}
-            Message::Hello { version, .. } => {
-                return Err(HandshakeError::Version {
-                    local: PROTOCOL_VERSION,
-                    remote: version,
-                })
-            }
-            other => return Err(HandshakeError::Unexpected(other)),
-        }
-
+        host_handshake_on(&mut conn, host_color, name).await?;
         Ok(Session {
             conn,
             my_color: host_color,
@@ -78,28 +63,7 @@ impl Session {
 
     /// Run the guest side of the handshake: receive our assigned color, echo it.
     pub async fn handshake_as_guest(mut conn: Connection, name: &str) -> Result<Session, HandshakeError> {
-        let my_color = match conn.recv().await? {
-            Message::Hello {
-                version,
-                your_color,
-                ..
-            } if version == PROTOCOL_VERSION => your_color,
-            Message::Hello { version, .. } => {
-                return Err(HandshakeError::Version {
-                    local: PROTOCOL_VERSION,
-                    remote: version,
-                })
-            }
-            other => return Err(HandshakeError::Unexpected(other)),
-        };
-
-        conn.send(&Message::Hello {
-            version: PROTOCOL_VERSION,
-            your_color: my_color.opponent(),
-            name: name.to_string(),
-        })
-        .await?;
-
+        let my_color = guest_handshake_on(&mut conn, name).await?;
         Ok(Session {
             conn,
             my_color,
@@ -168,8 +132,103 @@ impl Session {
         self.conn.send(&Message::DrawResponse { accept }).await
     }
 
+    /// Send the host's authoritative [`chess_core::Game`] to the guest. Used
+    /// when a guest (re)connects so it picks up the move history in progress.
+    pub async fn send_sync(&mut self, game: chess_core::Game) -> Result<(), NetError> {
+        self.conn
+            .send(&Message::Sync { game: Box::new(game) })
+            .await
+    }
+
     /// Await the next message from the peer.
     pub async fn recv(&mut self) -> Result<Message, NetError> {
         self.conn.recv().await
+    }
+}
+
+/// Run the host side of the handshake on an already-established
+/// [`Connection`] held by the caller. Lets a persistent host task run the
+/// handshake against successive guests over the same underlying transport
+/// (relay WS or a fresh LAN socket) without giving up ownership of the
+/// connection on each iteration.
+pub async fn host_handshake_on(
+    conn: &mut Connection,
+    host_color: Color,
+    name: &str,
+) -> Result<(), HandshakeError> {
+    conn.send(&Message::Hello {
+        version: PROTOCOL_VERSION,
+        your_color: host_color.opponent(),
+        name: name.to_string(),
+    })
+    .await?;
+
+    match conn.recv_event().await? {
+        InboundEvent::Message(Message::Hello { version, .. })
+            if version == PROTOCOL_VERSION => {}
+        InboundEvent::Message(Message::Hello { version, .. }) => {
+            return Err(HandshakeError::Version {
+                local: PROTOCOL_VERSION,
+                remote: version,
+            })
+        }
+        InboundEvent::Message(other) => return Err(HandshakeError::Unexpected(other)),
+        // Relay told us the would-be guest dropped before completing the
+        // handshake (most often: wrong password → guest couldn't decrypt our
+        // Hello and disconnected). The conn (our link to the server) is still
+        // alive; the caller may loop back and wait for the next guest.
+        InboundEvent::PeerLeft | InboundEvent::PeerJoined => {
+            return Err(HandshakeError::PeerLeft)
+        }
+    }
+    Ok(())
+}
+
+/// Run the guest side of the handshake on a borrowed [`Connection`], returning
+/// the color assigned by the host on success.
+pub async fn guest_handshake_on(
+    conn: &mut Connection,
+    name: &str,
+) -> Result<Color, HandshakeError> {
+    let my_color = match conn.recv_event().await? {
+        InboundEvent::Message(Message::Hello {
+            version,
+            your_color,
+            ..
+        }) if version == PROTOCOL_VERSION => your_color,
+        InboundEvent::Message(Message::Hello { version, .. }) => {
+            return Err(HandshakeError::Version {
+                local: PROTOCOL_VERSION,
+                remote: version,
+            })
+        }
+        InboundEvent::Message(other) => return Err(HandshakeError::Unexpected(other)),
+        InboundEvent::PeerLeft | InboundEvent::PeerJoined => {
+            return Err(HandshakeError::PeerLeft)
+        }
+    };
+
+    conn.send(&Message::Hello {
+        version: PROTOCOL_VERSION,
+        your_color: my_color.opponent(),
+        name: name.to_string(),
+    })
+    .await?;
+
+    Ok(my_color)
+}
+
+/// Wait for the relay server to signal that a peer has joined the room
+/// (skipping any stray `PeerLeft` or stale game frames left over from a
+/// previous guest). Returns `Err(NetError::Closed)` if the connection dies
+/// before that happens — a fatal condition for a persistent host loop.
+pub async fn wait_for_peer_joined(conn: &mut Connection) -> Result<(), NetError> {
+    loop {
+        match conn.recv_event().await? {
+            InboundEvent::PeerJoined => return Ok(()),
+            // PeerLeft or any stale message from a defunct guest: ignore and
+            // keep waiting for the next real arrival.
+            InboundEvent::PeerLeft | InboundEvent::Message(_) => continue,
+        }
     }
 }

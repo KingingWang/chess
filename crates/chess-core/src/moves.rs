@@ -64,6 +64,7 @@ impl Move {
 
 /// A move paired with the piece captured (if any), used to undo moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UndoState {
     pub mv: Move,
     pub captured: Option<Piece>,

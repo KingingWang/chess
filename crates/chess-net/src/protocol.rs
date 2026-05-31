@@ -5,7 +5,7 @@
 //! object per message. Only the basics required by the spec are modelled:
 //! handshake, move, resign, draw offer/response.
 
-use chess_core::{Color, Move};
+use chess_core::{Color, Game, Move};
 use serde::{Deserialize, Serialize};
 
 /// Protocol version for a minimal compatibility check during handshake.
@@ -29,7 +29,7 @@ impl WireMove {
 }
 
 /// Messages exchanged between the two peers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     /// Sent by both sides on connect. The server assigns colors; the client
@@ -50,6 +50,11 @@ pub enum Message {
     DrawOffer,
     /// Response to a [`Message::DrawOffer`].
     DrawResponse { accept: bool },
+    /// Full game-state snapshot pushed by the host so the guest matches the
+    /// host's authoritative position. Sent automatically when a (re)connecting
+    /// guest finishes its handshake, and whenever the host starts a new game
+    /// while a guest is already connected. Boxed to keep [`Message`] small.
+    Sync { game: Box<Game> },
     /// Application-level keepalive / no-op (optional).
     Ping,
 }
@@ -91,11 +96,31 @@ mod tests {
             Message::Resign,
             Message::DrawOffer,
             Message::DrawResponse { accept: true },
+            Message::Sync {
+                game: Box::new(Game::new()),
+            },
         ];
         for m in msgs {
             let line = m.to_line();
-            assert!(!line.contains('\n'));
-            assert_eq!(Message::from_line(&line).unwrap(), m);
+            assert!(!line.contains('\n'), "wire line must not contain newlines");
+            // Game has no PartialEq, so compare via the canonical wire form.
+            let round = Message::from_line(&line).unwrap();
+            assert_eq!(round.to_line(), line, "roundtrip mismatch for {line}");
+        }
+    }
+
+    #[test]
+    fn sync_carries_game_state() {
+        let mut g = Game::new();
+        let mv = Move::from_iccs("b2e2").unwrap();
+        g.make_move(mv).unwrap();
+        let line = (Message::Sync { game: Box::new(g.clone()) }).to_line();
+        match Message::from_line(&line).unwrap() {
+            Message::Sync { game } => {
+                assert_eq!(game.history_len(), 1);
+                assert_eq!(game.side_to_move(), chess_core::Color::Black);
+            }
+            other => panic!("expected Sync, got {other:?}"),
         }
     }
 }

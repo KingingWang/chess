@@ -23,7 +23,11 @@ pub use relay::{
     ControlMsg, PendingRelayHost, RelayClientConfig, RelayError, DEFAULT_RELAY_HOST,
     DEFAULT_RELAY_PORT,
 };
-pub use session::{HandshakeError, Role, Session};
+pub use connection::InboundEvent;
+pub use session::{
+    guest_handshake_on, host_handshake_on, wait_for_peer_joined, HandshakeError, Role,
+    Session,
+};
 
 #[cfg(test)]
 mod tests {

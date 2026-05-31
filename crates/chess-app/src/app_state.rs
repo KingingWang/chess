@@ -28,6 +28,23 @@ pub enum GameMode {
     RelayJoin,
 }
 
+impl GameMode {
+    /// True for any mode that involves a remote peer (LAN or relay).
+    pub fn is_networked(self) -> bool {
+        matches!(
+            self,
+            GameMode::LanHost | GameMode::LanJoin | GameMode::RelayHost | GameMode::RelayJoin
+        )
+    }
+
+    /// True for the side that hosts (creates) the room in a networked game.
+    /// The host owns the authoritative game state and resynchronises
+    /// reconnecting guests.
+    pub fn is_net_host(self) -> bool {
+        matches!(self, GameMode::LanHost | GameMode::RelayHost)
+    }
+}
+
 /// Selected difficulty for [`GameMode::VsAi`].
 #[derive(Resource, Debug, Clone)]
 pub struct AiSettings {
@@ -64,6 +81,10 @@ pub struct CoreGame {
     /// True once a networked session has actually connected to the peer.
     /// Used to distinguish a failed connect (→ back to menu) from a mid-game drop.
     pub connected: bool,
+    /// True while a previously connected peer is currently offline and the
+    /// host is waiting for them (or a new joiner with the same room/password)
+    /// to reconnect. Input is frozen and the HUD shows a reconnect notice.
+    pub peer_disconnected: bool,
 }
 
 impl Default for CoreGame {
@@ -76,6 +97,7 @@ impl Default for CoreGame {
             room_code: None,
             awaiting_peer: false,
             connected: false,
+            peer_disconnected: false,
         }
     }
 }

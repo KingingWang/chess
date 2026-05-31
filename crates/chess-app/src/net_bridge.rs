@@ -1,16 +1,26 @@
 //! Non-blocking networking bridge (LAN direct or relayed over the internet).
 //!
 //! A Tokio task owns the [`chess_net::Session`]; it forwards locally-issued
-//! commands (move/resign/draw) to the peer and pushes received peer events back
-//! to Bevy. Bevy systems only ever touch the two lock-free channels, so the
-//! render loop is never blocked on socket IO.
+//! commands (move/resign/draw/sync) to the peer and pushes received peer
+//! events back to Bevy. Bevy systems only ever touch the two lock-free
+//! channels, so the render loop is never blocked on socket IO.
+//!
+//! **Persistent host loops.** LAN and relay hosts run a loop: when a guest
+//! disconnects, the host stays alive and waits for the next joiner (with the
+//! same room number / port and password). The Bevy side is notified via
+//! [`NetEvent::PeerDisconnected`] and re-synchronised by a fresh
+//! [`NetEvent::Connected`] + [`NetCommand::Sync`] round once the new peer
+//! completes the handshake.
 
 use bevy::prelude::*;
-use chess_core::{Color as ChessColor, Move};
+use chess_core::{Color as ChessColor, Game, Move};
 
 use crate::app_state::{AppState, BoardOrientation, GameMode};
 use crate::lan_dialog::LanDialog;
-use chess_net::{Message, RelayClientConfig, Role, Session};
+use chess_net::{
+    host_handshake_on, wait_for_peer_joined, Connection, HandshakeError, InboundEvent,
+    Message, NetError, RelayClientConfig, Role, Server, Session,
+};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
 /// Resolved relay client configuration, loaded once at startup and shared with
@@ -35,6 +45,8 @@ pub enum NetCommand {
     Resign,
     DrawOffer,
     DrawResponse(bool),
+    /// Push the host's authoritative [`Game`] to the (just-(re)connected) guest.
+    Sync(Box<Game>),
 }
 
 /// Event sent from the network task -> Bevy.
@@ -42,12 +54,22 @@ pub enum NetCommand {
 pub enum NetEvent {
     /// Relay host only: the server assigned this room number to share.
     RoomCreated(String),
+    /// A peer has completed the handshake. Sent on the first connection and
+    /// again on every host-side reconnect.
     Connected { my_color: ChessColor },
+    /// The currently-connected peer disconnected; the host is waiting for the
+    /// next joiner. Does **not** tear down the session.
+    PeerDisconnected,
+    /// The host re-synchronised this client to its authoritative game state
+    /// (sent on guest reconnect to restore the in-progress position).
+    PeerSync(Box<Game>),
     PeerMove(Move),
     PeerResign,
     PeerDrawOffer,
     PeerDrawResponse(bool),
+    /// A non-fatal network error (logged; does not bounce mid-game).
     Error(String),
+    /// The session is terminally dead — bounce back to the menu.
     Disconnected,
 }
 
@@ -70,18 +92,22 @@ pub fn start_net(
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
     runtime.spawn(async move {
-        let session = establish(target, host_color, &name, &password, &evt_tx).await;
-        let mut session = match session {
-            Some(s) => s,
-            None => {
-                return; // an error was already reported
+        match target {
+            NetTarget::Lan {
+                role: Role::Host,
+                addr,
+            } => run_host_lan(addr, host_color, name, password, cmd_rx, evt_tx).await,
+            NetTarget::Lan {
+                role: Role::Guest,
+                addr,
+            } => run_guest_lan(addr, name, password, cmd_rx, evt_tx).await,
+            NetTarget::RelayHost { cfg } => {
+                run_host_relay(cfg, host_color, name, password, cmd_rx, evt_tx).await
             }
-        };
-        let _ = evt_tx.send(NetEvent::Connected {
-            my_color: session.my_color,
-        });
-
-        run_session_loop(&mut session, cmd_rx, evt_tx).await;
+            NetTarget::RelayJoin { cfg, room } => {
+                run_guest_relay(cfg, room, name, password, cmd_rx, evt_tx).await
+            }
+        }
     });
 
     NetLink {
@@ -90,95 +116,54 @@ pub fn start_net(
     }
 }
 
-/// Establish the session for `target`, reporting errors via `evt_tx`. Returns
-/// `None` (after sending an `Error`) on failure.
-async fn establish(
-    target: NetTarget,
-    host_color: ChessColor,
-    name: &str,
-    password: &str,
-    evt_tx: &Sender<NetEvent>,
-) -> Option<Session> {
-    use tokio::time::{timeout, Duration};
-    // A *joining* client (LAN guest / relay guest) should reach the host quickly;
-    // if it cannot, fail fast instead of looking "connected" forever. A *host*
-    // (LAN host / relay host) legitimately waits an unbounded time for a friend
-    // to arrive, so its accept/await phase is never timed out.
-    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
-
-    let result = match target {
-        NetTarget::Lan { role, addr } => match role {
-            Role::Host => Session::host(addr.as_str(), host_color, name, password).await,
-            Role::Guest => timeout(CONNECT_TIMEOUT, Session::join(addr.as_str(), name, password))
-                .await
-                .unwrap_or(Err(chess_net::HandshakeError::Timeout)),
-        },
-        NetTarget::RelayHost { cfg } => {
-            // Two phases: create (learn the room number to share), then wait
-            // for the guest, then run the color-assignment handshake. Only the
-            // initial create (server round-trip) is time-bounded.
-            match timeout(CONNECT_TIMEOUT, Session::relay_create(&cfg, password)).await {
-                Ok(Ok(pending)) => {
-                    let _ = evt_tx.send(NetEvent::RoomCreated(pending.room.clone()));
-                    match pending.await_guest().await {
-                        Ok(conn) => Session::handshake_as_host(conn, host_color, name).await,
-                        Err(e) => Err(e.into()),
-                    }
-                }
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(chess_net::HandshakeError::Timeout),
-            }
-        }
-        NetTarget::RelayJoin { cfg, room } => {
-            timeout(CONNECT_TIMEOUT, Session::join_relay(&cfg, &room, name, password))
-                .await
-                .unwrap_or(Err(chess_net::HandshakeError::Timeout))
-        }
-    };
-
-    match result {
-        Ok(s) => Some(s),
-        Err(e) => {
-            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
-            let _ = evt_tx.send(NetEvent::Disconnected);
-            None
-        }
-    }
+/// Outcome of one peer-relaying iteration of the inner loop.
+enum InnerOutcome {
+    /// The peer disconnected cleanly; the host loop should wait for the next
+    /// joiner.
+    PeerLeft,
+    /// The session is terminally dead (transport gone, our channel closed,
+    /// fatal protocol error). The task must return.
+    Fatal,
 }
 
-/// Drive the session: interleave outbound commands and inbound messages.
-async fn run_session_loop(
-    session: &mut Session,
-    cmd_rx: Receiver<NetCommand>,
-    evt_tx: Sender<NetEvent>,
-) {
+/// Drive a connected session: interleave outbound commands and inbound
+/// messages until the peer disconnects (returns [`InnerOutcome::PeerLeft`])
+/// or a fatal error occurs (returns [`InnerOutcome::Fatal`]).
+async fn run_inner_loop(
+    conn: &mut Connection,
+    cmd_rx: &Receiver<NetCommand>,
+    evt_tx: &Sender<NetEvent>,
+) -> InnerOutcome {
     use tokio::time::{sleep, Duration};
     loop {
-        // Drain any pending local commands (non-blocking).
+        // Drain any pending local commands first (non-blocking).
         loop {
             match cmd_rx.try_recv() {
                 Ok(cmd) => {
-                    let res = match cmd {
-                        NetCommand::Move(mv) => session.send_move(mv).await,
-                        NetCommand::Resign => session.resign().await,
-                        NetCommand::DrawOffer => session.offer_draw().await,
-                        NetCommand::DrawResponse(a) => session.respond_draw(a).await,
+                    let res: Result<(), NetError> = match cmd {
+                        NetCommand::Move(mv) => conn.send(&Message::Move { mv: mv.into() }).await,
+                        NetCommand::Resign => conn.send(&Message::Resign).await,
+                        NetCommand::DrawOffer => conn.send(&Message::DrawOffer).await,
+                        NetCommand::DrawResponse(a) => {
+                            conn.send(&Message::DrawResponse { accept: a }).await
+                        }
+                        NetCommand::Sync(game) => conn.send(&Message::Sync { game }).await,
                     };
                     if let Err(e) = res {
                         let _ = evt_tx.send(NetEvent::Error(format!("send failed: {e}")));
-                        let _ = evt_tx.send(NetEvent::Disconnected);
-                        return;
+                        return InnerOutcome::Fatal;
                     }
                 }
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return,
+                // Bevy dropped the link (e.g. menu teardown): treat as fatal.
+                Err(TryRecvError::Disconnected) => return InnerOutcome::Fatal,
             }
         }
 
         // Poll the socket with a short timeout so we stay responsive to local
         // commands without busy-spinning.
-        match tokio::time::timeout(Duration::from_millis(20), session.recv()).await {
-            Ok(Ok(msg)) => {
+        match tokio::time::timeout(Duration::from_millis(20), conn.recv_event()).await {
+            Ok(Ok(InboundEvent::Message(msg))) => {
                 let evt = match msg {
                     Message::Move { mv } => match mv.parse() {
                         Some(m) => NetEvent::PeerMove(m),
@@ -187,24 +172,296 @@ async fn run_session_loop(
                     Message::Resign => NetEvent::PeerResign,
                     Message::DrawOffer => NetEvent::PeerDrawOffer,
                     Message::DrawResponse { accept } => NetEvent::PeerDrawResponse(accept),
+                    Message::Sync { game } => NetEvent::PeerSync(game),
+                    // Hello and Ping arriving mid-session are stale/keepalive
+                    // noise and silently ignored.
                     Message::Hello { .. } | Message::Ping => continue,
                 };
                 if evt_tx.send(evt).is_err() {
-                    return;
+                    return InnerOutcome::Fatal;
                 }
             }
+            // Relay told us the peer left: end this iteration cleanly so the
+            // host loop can await the next joiner.
+            Ok(Ok(InboundEvent::PeerLeft)) => return InnerOutcome::PeerLeft,
+            // A stray PeerJoined here would mean the server's already routed a
+            // new guest before we exited this iteration; treat the same — let
+            // the host re-handshake.
+            Ok(Ok(InboundEvent::PeerJoined)) => return InnerOutcome::PeerLeft,
+            Ok(Err(NetError::Closed)) => return InnerOutcome::PeerLeft,
             Ok(Err(e)) => {
                 let _ = evt_tx.send(NetEvent::Error(format!("recv failed: {e}")));
-                let _ = evt_tx.send(NetEvent::Disconnected);
-                return;
+                // A decryption / decode error from this peer is not fatal to
+                // the host loop (the peer just sent garbage); but for a guest
+                // there's no recovery path either way, and the host loop will
+                // see the peer drop on its next read. Bail this iteration.
+                return InnerOutcome::PeerLeft;
             }
             Err(_) => {
-                // timeout: just loop again to check commands
+                // recv timeout: loop again to check commands.
                 sleep(Duration::from_millis(1)).await;
             }
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// LAN
+// ---------------------------------------------------------------------------
+
+/// Persistent LAN host task: bind once, then loop accepting guests on the same
+/// port. When a guest drops, emit [`NetEvent::PeerDisconnected`] and wait for
+/// the next joiner.
+async fn run_host_lan(
+    addr: String,
+    host_color: ChessColor,
+    name: String,
+    password: String,
+    cmd_rx: Receiver<NetCommand>,
+    evt_tx: Sender<NetEvent>,
+) {
+    let server = match Server::bind(addr.as_str()).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+    };
+    loop {
+        let mut conn = match server.accept_one(&password).await {
+            Ok(c) => c,
+            Err(e) => {
+                // The listener died (or a one-off OS error). For the very first
+                // attempt this is a true connect failure; for a re-accept it
+                // means the listening socket is gone and we cannot recover.
+                let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+                let _ = evt_tx.send(NetEvent::Disconnected);
+                return;
+            }
+        };
+        if let Err(e) = host_handshake_on(&mut conn, host_color, &name).await {
+            // The listener is still fine — the joiner just couldn't complete
+            // the handshake (wrong password, abort, protocol mismatch). Log
+            // and keep waiting for the next attempt. We never bail here.
+            let _ = evt_tx.send(NetEvent::Error(format!("rejected joiner: {e}")));
+            continue;
+        }
+        if evt_tx
+            .send(NetEvent::Connected {
+                my_color: host_color,
+            })
+            .is_err()
+        {
+            return;
+        }
+        match run_inner_loop(&mut conn, &cmd_rx, &evt_tx).await {
+            InnerOutcome::PeerLeft => {
+                if evt_tx.send(NetEvent::PeerDisconnected).is_err() {
+                    return;
+                }
+                continue;
+            }
+            InnerOutcome::Fatal => {
+                let _ = evt_tx.send(NetEvent::Disconnected);
+                return;
+            }
+        }
+    }
+}
+
+/// LAN guest: single-shot connect; on disconnect the session ends.
+async fn run_guest_lan(
+    addr: String,
+    name: String,
+    password: String,
+    cmd_rx: Receiver<NetCommand>,
+    evt_tx: Sender<NetEvent>,
+) {
+    use tokio::time::{timeout, Duration};
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+
+    let res = timeout(CONNECT_TIMEOUT, Session::join(addr.as_str(), &name, &password)).await;
+    let mut session = match res {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+        Err(_) => {
+            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+    };
+    if evt_tx
+        .send(NetEvent::Connected {
+            my_color: session.my_color,
+        })
+        .is_err()
+    {
+        return;
+    }
+    let _ = run_inner_loop(&mut session.conn, &cmd_rx, &evt_tx).await;
+    let _ = evt_tx.send(NetEvent::Disconnected);
+}
+
+// ---------------------------------------------------------------------------
+// Relay (internet)
+// ---------------------------------------------------------------------------
+
+/// Persistent relay host task: create the room, then loop accepting guests on
+/// the same WebSocket. The relay server keeps the room number reserved for
+/// the lifetime of the host's WSS connection.
+async fn run_host_relay(
+    cfg: RelayClientConfig,
+    host_color: ChessColor,
+    name: String,
+    password: String,
+    cmd_rx: Receiver<NetCommand>,
+    evt_tx: Sender<NetEvent>,
+) {
+    use tokio::time::{timeout, Duration};
+    const CREATE_TIMEOUT: Duration = Duration::from_secs(12);
+
+    let pending = match timeout(CREATE_TIMEOUT, Session::relay_create(&cfg, &password)).await {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+        Err(_) => {
+            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+    };
+    if evt_tx
+        .send(NetEvent::RoomCreated(pending.room.clone()))
+        .is_err()
+    {
+        return;
+    }
+
+    let mut conn = match pending.await_guest().await {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+    };
+
+    let mut first = true;
+    loop {
+        if !first {
+            // Wait for the next PeerJoined notice from the relay server.
+            if let Err(e) = wait_for_peer_joined(&mut conn).await {
+                let _ = evt_tx.send(NetEvent::Error(format!("relay closed: {e}")));
+                let _ = evt_tx.send(NetEvent::Disconnected);
+                return;
+            }
+        }
+        // A failed handshake consumes the "we already have a peer ready"
+        // state, so set `first = false` first: the next iteration must wait
+        // for the relay to signal a fresh PeerJoined before trying again
+        // (otherwise we'd re-send our stale Hello into wait_next_guest and
+        // never line up with the new joiner — they'd both be parked waiting
+        // for each other).
+        first = false;
+        match host_handshake_on(&mut conn, host_color, &name).await {
+            Ok(()) => {}
+            // PeerLeft: relay told us the joiner gave up (typical for wrong
+            // password — the guest couldn't decrypt our Hello and dropped).
+            // The relay WS is still healthy: loop and wait for the next.
+            Err(HandshakeError::PeerLeft) => {
+                let _ = evt_tx.send(NetEvent::Error("rejected joiner: peer left".into()));
+                continue;
+            }
+            Err(HandshakeError::Net(NetError::Closed)) => {
+                // The relay link itself died — fatal.
+                let _ = evt_tx.send(NetEvent::Error("relay connection closed".into()));
+                let _ = evt_tx.send(NetEvent::Disconnected);
+                return;
+            }
+            Err(e) => {
+                // Protocol mismatch / decode error from the joiner: keep the
+                // room open, log, and wait for the next.
+                let _ = evt_tx.send(NetEvent::Error(format!("rejected joiner: {e}")));
+                continue;
+            }
+        }
+        if evt_tx
+            .send(NetEvent::Connected {
+                my_color: host_color,
+            })
+            .is_err()
+        {
+            return;
+        }
+        match run_inner_loop(&mut conn, &cmd_rx, &evt_tx).await {
+            InnerOutcome::PeerLeft => {
+                if evt_tx.send(NetEvent::PeerDisconnected).is_err() {
+                    return;
+                }
+                continue;
+            }
+            InnerOutcome::Fatal => {
+                let _ = evt_tx.send(NetEvent::Disconnected);
+                return;
+            }
+        }
+    }
+}
+
+/// Relay guest: single-shot connect; on disconnect the session ends.
+async fn run_guest_relay(
+    cfg: RelayClientConfig,
+    room: String,
+    name: String,
+    password: String,
+    cmd_rx: Receiver<NetCommand>,
+    evt_tx: Sender<NetEvent>,
+) {
+    use tokio::time::{timeout, Duration};
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+
+    let res = timeout(
+        CONNECT_TIMEOUT,
+        Session::join_relay(&cfg, &room, &name, &password),
+    )
+    .await;
+    let mut session = match res {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+        Err(_) => {
+            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Disconnected);
+            return;
+        }
+    };
+    if evt_tx
+        .send(NetEvent::Connected {
+            my_color: session.my_color,
+        })
+        .is_err()
+    {
+        return;
+    }
+    // Guest doesn't reconnect; one inner loop and we're done.
+    let _ = run_inner_loop(&mut session.conn, &cmd_rx, &evt_tx).await;
+    let _ = evt_tx.send(NetEvent::Disconnected);
+}
+
+// ---------------------------------------------------------------------------
+// Bevy poll system
+// ---------------------------------------------------------------------------
 
 /// A user-facing message for a connection that failed *before* it was ever
 /// established (server down, room missing, wrong password, host absent, ...).
@@ -238,10 +495,11 @@ pub fn poll_net_events(
 
     // Drain first so we never hold the channel borrow across a state change.
     let events: Vec<NetEvent> = link.inbound.try_iter().collect();
+
     for evt in events {
-        // Any failure before we ever connected means the room could not be
-        // joined/created: abort back to the menu and show why, instead of
-        // sitting on an empty board forever.
+        // A terminal `Disconnected` or `Error` *before we ever connected* means
+        // the room could not be joined/created: abort back to the menu with a
+        // user-visible reason instead of sitting on an empty board forever.
         if matches!(evt, NetEvent::Error(_) | NetEvent::Disconnected) && !core.connected {
             if let NetEvent::Error(ref e) = evt {
                 warn!(error = %e, "connection failed before established");
@@ -265,11 +523,26 @@ pub fn poll_net_events(
             NetEvent::Connected { my_color } => {
                 core.local_color = my_color;
                 core.awaiting_peer = false;
+                core.peer_disconnected = false;
                 core.connected = true;
                 // Flip the board so the local player always sits at the bottom.
                 *orient = BoardOrientation::from_color(my_color);
                 dirty.0 = true;
                 info!(?my_color, "connected to peer");
+                // Hosts push their authoritative game state so a (re)joining
+                // guest can resume the match from the current position.
+                if core.mode.is_net_host() {
+                    let _ = link
+                        .out
+                        .send(NetCommand::Sync(Box::new(core.game.clone())));
+                }
+            }
+            NetEvent::PeerSync(game) => {
+                core.game = *game;
+                core.awaiting_peer = false;
+                core.peer_disconnected = false;
+                dirty.0 = true;
+                info!("synchronised with host's game state");
             }
             NetEvent::PeerMove(mv) => {
                 crate::moves::apply_local_move(&mut core, mv);
@@ -289,10 +562,18 @@ pub fn poll_net_events(
                     core.game.agree_draw();
                 }
             }
+            NetEvent::PeerDisconnected => {
+                core.peer_disconnected = true;
+                warn!("peer disconnected; awaiting reconnect");
+            }
             NetEvent::Error(e) => warn!(error = %e, "network error"),
             NetEvent::Disconnected => {
+                // Session terminated after at least one successful connect.
+                // We don't auto-bounce here so the player can see the final
+                // position; they return to the menu via the HUD button.
                 core.awaiting_peer = false;
-                warn!("peer disconnected");
+                core.peer_disconnected = true;
+                warn!("session ended");
             }
         }
     }
@@ -303,6 +584,7 @@ mod tests {
     use super::*;
     use crate::app_state::CoreGame;
     use crate::board_view::RenderDirty;
+    use chess_core::Game;
 
     fn base_app() -> App {
         let mut app = App::new();
@@ -315,14 +597,17 @@ mod tests {
         app
     }
 
-    fn link_with(event: NetEvent) -> NetLink {
-        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded::<NetCommand>();
+    fn link_with(event: NetEvent) -> (NetLink, Receiver<NetCommand>) {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<NetCommand>();
         let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
         evt_tx.send(event).unwrap();
-        NetLink {
-            out: cmd_tx,
-            inbound: evt_rx,
-        }
+        (
+            NetLink {
+                out: cmd_tx,
+                inbound: evt_rx,
+            },
+            cmd_rx,
+        )
     }
 
     #[test]
@@ -335,7 +620,8 @@ mod tests {
             ..Default::default()
         };
         app.insert_resource(core);
-        app.insert_resource(link_with(NetEvent::Error("connection refused".into())));
+        let (link, _cmd_rx) = link_with(NetEvent::Error("connection refused".into()));
+        app.insert_resource(link);
 
         app.update();
 
@@ -414,9 +700,10 @@ mod tests {
             ..Default::default()
         };
         app.insert_resource(core);
-        app.insert_resource(link_with(NetEvent::Connected {
+        let (link, _cmd_rx) = link_with(NetEvent::Connected {
             my_color: ChessColor::Black,
-        }));
+        });
+        app.insert_resource(link);
 
         app.update();
 
@@ -424,6 +711,78 @@ mod tests {
         assert!(!core.awaiting_peer, "a connected game must stop waiting");
         assert!(core.connected, "connected flag must be set");
         assert_eq!(core.local_color, ChessColor::Black, "color comes from peer");
+    }
+
+    #[test]
+    fn connected_event_on_host_pushes_sync_command() {
+        let mut app = base_app();
+        let core = CoreGame {
+            mode: GameMode::RelayHost,
+            awaiting_peer: true,
+            connected: false,
+            ..Default::default()
+        };
+        app.insert_resource(core);
+        let (link, cmd_rx) = link_with(NetEvent::Connected {
+            my_color: ChessColor::Red,
+        });
+        app.insert_resource(link);
+
+        app.update();
+
+        match cmd_rx.try_recv() {
+            Ok(NetCommand::Sync(_)) => {}
+            other => panic!("host must push Sync after Connected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn peer_sync_overrides_local_game() {
+        let mut app = base_app();
+        let core = CoreGame {
+            mode: GameMode::RelayJoin,
+            connected: true,
+            peer_disconnected: false,
+            ..Default::default()
+        };
+        app.insert_resource(core);
+        // Build a host-side game with one move played.
+        let mut host_game = Game::new();
+        host_game.make_move(Move::from_iccs("h2e2").unwrap()).unwrap();
+        let (link, _cmd_rx) = link_with(NetEvent::PeerSync(Box::new(host_game.clone())));
+        app.insert_resource(link);
+
+        app.update();
+
+        let core = app.world().resource::<CoreGame>();
+        assert_eq!(
+            core.game.history_len(),
+            1,
+            "PeerSync should replace local game with host's state"
+        );
+        assert!(!core.peer_disconnected);
+    }
+
+    #[test]
+    fn peer_disconnected_does_not_bounce_to_menu() {
+        let mut app = base_app();
+        let core = CoreGame {
+            mode: GameMode::RelayHost,
+            connected: true, // already mid-game
+            ..Default::default()
+        };
+        app.insert_resource(core);
+        let (link, _cmd_rx) = link_with(NetEvent::PeerDisconnected);
+        app.insert_resource(link);
+
+        app.update();
+
+        let core = app.world().resource::<CoreGame>();
+        assert!(core.peer_disconnected, "flag must be set");
+        assert!(
+            app.world().get_resource::<NetLink>().is_some(),
+            "link must stay alive so the host can serve a reconnect"
+        );
     }
 
     #[test]
@@ -435,7 +794,8 @@ mod tests {
             ..Default::default()
         };
         app.insert_resource(core);
-        app.insert_resource(link_with(NetEvent::Error("transient".into())));
+        let (link, _cmd_rx) = link_with(NetEvent::Error("transient".into()));
+        app.insert_resource(link);
 
         app.update();
 

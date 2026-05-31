@@ -45,6 +45,7 @@ pub enum DrawReason {
 
 /// Mutable game with full undo history and repetition tracking.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Game {
     board: Board,
     history: Vec<HistoryEntry>,
@@ -54,6 +55,7 @@ pub struct Game {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 struct HistoryEntry {
     undo: UndoState,
     /// FEN of the position *before* the move (placement + side only).

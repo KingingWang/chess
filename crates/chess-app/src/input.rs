@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 use chess_core::Move;
 
-use crate::app_state::{world_to_square, BoardOrientation, CoreGame, GameMode, Selection};
+use crate::app_state::{world_to_square, BoardOrientation, CoreGame, Selection};
 use crate::board_view::RenderDirty;
 use crate::net_bridge::{NetCommand, NetLink};
 
@@ -23,8 +23,9 @@ pub fn handle_click(
     if !buttons.just_pressed(MouseButton::Left) {
         return;
     }
-    // Block board interaction until a networked game is actually connected.
-    if core.awaiting_peer {
+    // Block board interaction until a networked game is actually connected,
+    // and while the peer is offline (host waiting for a reconnect).
+    if core.awaiting_peer || core.peer_disconnected {
         return;
     }
     if core.game.is_over() || !core.local_to_move() {
@@ -76,8 +77,8 @@ pub fn handle_click(
             if core.game.make_move(mv).is_ok() {
                 selection.from = None;
                 dirty.0 = true;
-                // Forward to peer in networked modes.
-                if matches!(core.mode, GameMode::LanHost | GameMode::LanJoin) {
+                // Forward to peer in any networked mode (LAN or relay).
+                if core.mode.is_networked() {
                     if let Some(net) = net {
                         let _ = net.out.send(NetCommand::Move(mv));
                     }

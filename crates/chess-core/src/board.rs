@@ -4,11 +4,46 @@ use crate::moves::{Move, UndoState};
 use crate::piece::{Color, Piece, PieceKind};
 use crate::square::{self, Square, FILES, NUM_SQUARES, RANKS};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Full board position: piece placement plus side to move.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Board {
+    #[cfg_attr(feature = "serde", serde(with = "serde_squares"))]
     squares: [Option<Piece>; NUM_SQUARES],
     side_to_move: Color,
+}
+
+#[cfg(feature = "serde")]
+mod serde_squares {
+    //! Serde doesn't provide a default impl for arrays larger than 32; the
+    //! 90-square board is serialized as a length-prefixed sequence instead,
+    //! keeping the wire format compact and free of extra dependencies.
+    use super::*;
+    use serde::de::Error as _;
+
+    pub fn serialize<S: serde::Serializer>(
+        arr: &[Option<Piece>; NUM_SQUARES],
+        ser: S,
+    ) -> Result<S::Ok, S::Error> {
+        ser.collect_seq(arr.iter())
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        de: D,
+    ) -> Result<[Option<Piece>; NUM_SQUARES], D::Error> {
+        let v: Vec<Option<Piece>> = Vec::deserialize(de)?;
+        if v.len() != NUM_SQUARES {
+            return Err(D::Error::invalid_length(v.len(), &"90 squares"));
+        }
+        let mut out = [None; NUM_SQUARES];
+        for (i, p) in v.into_iter().enumerate() {
+            out[i] = p;
+        }
+        Ok(out)
+    }
 }
 
 impl Board {

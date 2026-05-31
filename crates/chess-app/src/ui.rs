@@ -271,6 +271,14 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
     let Ok(mut text) = q.single_mut() else {
         return;
     };
+    if core.peer_disconnected && !core.game.is_over() {
+        // Mid-game disconnect: freeze the board and tell the player we're
+        // holding for the peer to come back (LAN: same port; relay: same
+        // room number).
+        **text = "对方已断开
+等待重连…".to_string();
+        return;
+    }
     if core.awaiting_peer {
         **text = match core.mode {
             // Host side: room is open, waiting for a friend to arrive.
@@ -337,6 +345,14 @@ pub fn hud_interaction(
                 HudAction::NewGame => {
                     core.restart();
                     dirty.0 = true;
+                    // Hosts of a networked game must broadcast the reset so
+                    // the connected guest also restarts (otherwise the two
+                    // sides desync immediately).
+                    if core.mode.is_net_host() {
+                        if let Some(net) = &net {
+                            let _ = net.out.send(NetCommand::Sync(Box::new(core.game.clone())));
+                        }
+                    }
                 }
                 HudAction::Resign => {
                     let me = core.local_color;

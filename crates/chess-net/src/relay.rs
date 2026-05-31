@@ -52,6 +52,9 @@ pub enum ControlMsg {
     Joined { salt: String },
     /// Server -> host: the guest has connected; relaying begins.
     PeerJoined,
+    /// Server -> host: the previously connected guest has disconnected.
+    /// The host should remain on this socket and wait for the next guest.
+    PeerLeft,
     /// Server -> client: a fatal error (e.g. unknown room).
     Error { msg: String },
 }
