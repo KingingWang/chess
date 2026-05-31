@@ -22,15 +22,17 @@ OUT = {
 RANGES = "U+0020-007E,U+3000-303F,U+FF00-FF60"
 
 def collect_chars() -> set[str]:
+    """Every non-ASCII character appearing anywhere in any .rs file under
+    crates/. We deliberately scan the raw source (not just string literals) so
+    we also catch `char` literals like `'帅'` and Chinese characters used in
+    `match` arms, doc comments, etc. The cost of including a few harmless extra
+    glyphs is negligible (~tens of KB) versus the bug of missing one."""
     chars: set[str] = set()
-    pat = re.compile(r'"((?:[^"\\]|\\.)*)"')
     for path in (ROOT / "crates").rglob("*.rs"):
         text = path.read_text(encoding="utf-8", errors="ignore")
-        for m in pat.finditer(text):
-            for ch in m.group(1):
-                # Anything non-ASCII goes in --text; ASCII covered by RANGES.
-                if ord(ch) > 0x7E:
-                    chars.add(ch)
+        for ch in text:
+            if ord(ch) > 0x7E:
+                chars.add(ch)
     return chars
 
 def extract_sc(ttc_path: str, out_path: Path) -> None:
@@ -43,7 +45,7 @@ def extract_sc(ttc_path: str, out_path: Path) -> None:
 
 def main() -> int:
     chars = collect_chars()
-    print(f"collected {len(chars)} distinct non-ASCII chars from string literals")
+    print(f"collected {len(chars)} distinct non-ASCII chars from source")
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for variant, ttc in SRC.items():
