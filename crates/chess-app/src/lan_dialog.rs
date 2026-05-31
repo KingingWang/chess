@@ -620,7 +620,14 @@ fn submit_lan(
         )
     };
 
+    eprintln!(
+        "[netdbg] submit_lan: is_host={} mode={:?} pwd_len={}",
+        dialog.is_host,
+        mode,
+        dialog.password.len()
+    );
     start_game(core, next, GameSetup { mode, room_code: None });
+    eprintln!("[netdbg] submit_lan: awaiting_peer={} -> InGame", core.awaiting_peer);
     let link = start_net(
         &runtime.0,
         target,
@@ -659,7 +666,17 @@ fn submit_server(
         )
     };
 
+    eprintln!(
+        "[netdbg] submit_server: is_host={} mode={:?} host={}:{} insecure={} pwd_len={}",
+        dialog.is_host,
+        mode,
+        relay.0.host,
+        relay.0.port,
+        relay.0.insecure,
+        dialog.password.len()
+    );
     start_game(core, next, GameSetup { mode, room_code });
+    eprintln!("[netdbg] submit_server: awaiting_peer={} -> InGame", core.awaiting_peer);
     let link = start_net(
         &runtime.0,
         target,

@@ -70,11 +70,16 @@ pub fn start_net(
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
     runtime.spawn(async move {
+        eprintln!("[netdbg] connect task started");
         let session = establish(target, host_color, &name, &password, &evt_tx).await;
         let mut session = match session {
             Some(s) => s,
-            None => return, // an error was already reported
+            None => {
+                eprintln!("[netdbg] establish returned None -> task exiting (error already sent)");
+                return; // an error was already reported
+            }
         };
+        eprintln!("[netdbg] establish OK -> sending Connected (my_color={:?})", session.my_color);
         let _ = evt_tx.send(NetEvent::Connected {
             my_color: session.my_color,
         });
@@ -137,6 +142,7 @@ async fn establish(
     match result {
         Ok(s) => Some(s),
         Err(e) => {
+            eprintln!("[netdbg] establish error: {e}");
             let _ = evt_tx.send(NetEvent::Error(format!("handshake failed: {e}")));
             let _ = evt_tx.send(NetEvent::Disconnected);
             None
@@ -235,11 +241,22 @@ pub fn poll_net_events(
 
     // Drain first so we never hold the channel borrow across a state change.
     let events: Vec<NetEvent> = link.inbound.try_iter().collect();
+    if !events.is_empty() {
+        eprintln!(
+            "[netdbg] poll_net_events: {} event(s) (mode={:?} connected={} awaiting={})",
+            events.len(),
+            core.mode,
+            core.connected,
+            core.awaiting_peer
+        );
+    }
     for evt in events {
+        eprintln!("[netdbg] event = {evt:?}");
         // Any failure before we ever connected means the room could not be
         // joined/created: abort back to the menu and show why, instead of
         // sitting on an empty board forever.
         if matches!(evt, NetEvent::Error(_) | NetEvent::Disconnected) && !core.connected {
+            eprintln!("[netdbg] -> bouncing back to menu (failure before connect)");
             if let NetEvent::Error(ref e) = evt {
                 warn!(error = %e, "connection failed before established");
             }
@@ -343,6 +360,58 @@ mod tests {
             NextState::Pending(s) => assert_eq!(*s, AppState::Menu),
             _ => panic!("expected a pending transition back to the menu"),
         }
+    }
+
+    #[test]
+    fn lan_join_to_refused_address_bounces_to_menu() {
+        use std::time::{Duration, Instant};
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // Port 1 on loopback refuses immediately: a real connect failure.
+        let link = start_net(
+            &rt,
+            NetTarget::Lan {
+                role: Role::Guest,
+                addr: "127.0.0.1:1".into(),
+            },
+            ChessColor::Red,
+            "guest".into(),
+            "pw".into(),
+        );
+
+        let mut app = base_app();
+        let core = CoreGame {
+            mode: GameMode::LanJoin,
+            awaiting_peer: true,
+            connected: false,
+            ..Default::default()
+        };
+        app.insert_resource(core);
+        app.insert_resource(link);
+
+        let start = Instant::now();
+        loop {
+            app.update();
+            if app.world().get_resource::<NetLink>().is_none() {
+                break; // bounced: dead link removed
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "join to a refused address must bounce back, but it never did"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let dialog = app.world().resource::<LanDialog>();
+        assert!(dialog.open, "menu dialog should reopen on failure");
+        assert!(dialog.error.is_some(), "an error must be shown");
+        assert!(
+            !app.world().resource::<CoreGame>().connected,
+            "must never have been marked connected"
+        );
     }
 
     #[test]
