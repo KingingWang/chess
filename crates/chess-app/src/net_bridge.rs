@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, Move};
 
-use crate::app_state::{AppState, GameMode};
+use crate::app_state::{AppState, BoardOrientation, GameMode};
 use crate::lan_dialog::LanDialog;
 use chess_net::{Message, RelayClientConfig, Role, Session};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -228,6 +228,7 @@ pub fn poll_net_events(
     link: Option<Res<NetLink>>,
     mut core: ResMut<crate::app_state::CoreGame>,
     mut dirty: ResMut<crate::board_view::RenderDirty>,
+    mut orient: ResMut<BoardOrientation>,
     mut next: ResMut<NextState<AppState>>,
     mut dialog: ResMut<LanDialog>,
 ) {
@@ -265,6 +266,9 @@ pub fn poll_net_events(
                 core.local_color = my_color;
                 core.awaiting_peer = false;
                 core.connected = true;
+                // Flip the board so the local player always sits at the bottom.
+                *orient = BoardOrientation::from_color(my_color);
+                dirty.0 = true;
                 info!(?my_color, "connected to peer");
             }
             NetEvent::PeerMove(mv) => {
@@ -305,6 +309,7 @@ mod tests {
         app.add_plugins(bevy::state::app::StatesPlugin);
         app.init_state::<AppState>();
         app.insert_resource(RenderDirty::default());
+        app.insert_resource(BoardOrientation::default());
         app.insert_resource(LanDialog::default());
         app.add_systems(Update, poll_net_events);
         app

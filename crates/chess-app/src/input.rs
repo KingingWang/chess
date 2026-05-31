@@ -5,10 +5,11 @@
 use bevy::prelude::*;
 use chess_core::Move;
 
-use crate::app_state::{world_to_square, CoreGame, GameMode, Selection};
+use crate::app_state::{world_to_square, BoardOrientation, CoreGame, GameMode, Selection};
 use crate::board_view::RenderDirty;
 use crate::net_bridge::{NetCommand, NetLink};
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_click(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -16,6 +17,7 @@ pub fn handle_click(
     mut core: ResMut<CoreGame>,
     mut selection: ResMut<Selection>,
     mut dirty: ResMut<RenderDirty>,
+    orient: Res<BoardOrientation>,
     net: Option<Res<NetLink>>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) {
@@ -41,7 +43,7 @@ pub fn handle_click(
     let Ok(world) = camera.viewport_to_world_2d(cam_tf, cursor) else {
         return;
     };
-    let Some(clicked) = world_to_square(world) else {
+    let Some(clicked) = world_to_square(world, *orient) else {
         return;
     };
 

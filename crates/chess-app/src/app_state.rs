@@ -105,27 +105,57 @@ pub struct Selection {
     pub from: Option<chess_core::Square>,
 }
 
+/// Whose side faces the bottom of the screen.
+///
+/// Networked games flip the board for the player controlling Black so their
+/// own pieces are always on the near (bottom) side, matching the over-the-board
+/// experience. Local PvP / VsAi always keep Red at the bottom.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoardOrientation {
+    #[default]
+    Red,
+    Black,
+}
+
+impl BoardOrientation {
+    pub fn from_color(color: ChessColor) -> Self {
+        match color {
+            ChessColor::Red => BoardOrientation::Red,
+            ChessColor::Black => BoardOrientation::Black,
+        }
+    }
+}
+
 /// Geometry constants for mapping board coordinates to world space.
 pub const CELL: f32 = 64.0;
 pub const PIECE_RADIUS: f32 = 27.0;
 
-/// World position (x, y) for a board square. Red (rank 0) is at the bottom.
-pub fn square_to_world(sq: chess_core::Square) -> Vec2 {
-    let f = sq.file() as f32;
-    let r = sq.rank() as f32;
+/// World position (x, y) for a board square under the given orientation.
+///
+/// Red orientation: rank 0 (Red back-rank) sits at the bottom of the screen.
+/// Black orientation: 180°-rotated, so Black's back-rank sits at the bottom.
+pub fn square_to_world(sq: chess_core::Square, orient: BoardOrientation) -> Vec2 {
+    let (f, r) = match orient {
+        BoardOrientation::Red => (sq.file() as f32, sq.rank() as f32),
+        BoardOrientation::Black => ((8 - sq.file()) as f32, (9 - sq.rank()) as f32),
+    };
     Vec2::new((f - 4.0) * CELL, (r - 4.5) * CELL)
 }
 
 /// Nearest board square to a world position, if within half a cell.
-pub fn world_to_square(pos: Vec2) -> Option<chess_core::Square> {
+pub fn world_to_square(pos: Vec2, orient: BoardOrientation) -> Option<chess_core::Square> {
     let f = (pos.x / CELL + 4.0).round();
     let r = (pos.y / CELL + 4.5).round();
     if !(0.0..=8.0).contains(&f) || !(0.0..=9.0).contains(&r) {
         return None;
     }
-    let sq = chess_core::Square::new(f as u8, r as u8)?;
+    let (sf, sr) = match orient {
+        BoardOrientation::Red => (f as u8, r as u8),
+        BoardOrientation::Black => (8 - f as u8, 9 - r as u8),
+    };
+    let sq = chess_core::Square::new(sf, sr)?;
     // Reject clicks too far from the intersection.
-    let center = square_to_world(sq);
+    let center = square_to_world(sq, orient);
     if pos.distance(center) <= CELL * 0.5 {
         Some(sq)
     } else {
@@ -139,4 +169,66 @@ pub fn world_to_square(pos: Vec2) -> Option<chess_core::Square> {
 pub struct UiFonts {
     pub regular: Handle<Font>,
     pub bold: Handle<Font>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chess_core::Square;
+
+    #[test]
+    fn red_orientation_puts_rank_zero_at_bottom() {
+        let sq = Square::new(4, 0).unwrap(); // Red palace centre
+        let p = square_to_world(sq, BoardOrientation::Red);
+        assert!(p.y < 0.0, "Red rank 0 must be below center, got y={}", p.y);
+    }
+
+    #[test]
+    fn black_orientation_puts_rank_zero_at_top() {
+        let sq = Square::new(4, 0).unwrap();
+        let p = square_to_world(sq, BoardOrientation::Black);
+        assert!(p.y > 0.0, "Black orientation must place Red rank 0 at top, got y={}", p.y);
+    }
+
+    #[test]
+    fn black_orientation_puts_black_back_rank_at_bottom() {
+        let sq = Square::new(4, 9).unwrap(); // Black general
+        let p = square_to_world(sq, BoardOrientation::Black);
+        assert!(p.y < 0.0, "Black rank 9 must be at bottom under Black orientation, got y={}", p.y);
+    }
+
+    #[test]
+    fn orientation_is_180_rotation_not_mirror() {
+        // A piece on Red's right cannon point (file 7, rank 2) should land,
+        // under Black orientation, on the Black side at file 1, rank 7 —
+        // i.e. a true 180° rotation, not a horizontal mirror.
+        let sq = Square::new(7, 2).unwrap();
+        let red_pos = square_to_world(sq, BoardOrientation::Red);
+        let black_pos = square_to_world(sq, BoardOrientation::Black);
+        assert!((red_pos.x + black_pos.x).abs() < 1e-3);
+        assert!((red_pos.y + black_pos.y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn world_to_square_roundtrip_in_both_orientations() {
+        for &orient in &[BoardOrientation::Red, BoardOrientation::Black] {
+            for f in 0..9 {
+                for r in 0..10 {
+                    let sq = Square::new(f, r).unwrap();
+                    let world = square_to_world(sq, orient);
+                    assert_eq!(
+                        world_to_square(world, orient),
+                        Some(sq),
+                        "roundtrip failed for ({f},{r}) under {orient:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn orientation_from_color_matches_color() {
+        assert_eq!(BoardOrientation::from_color(ChessColor::Red), BoardOrientation::Red);
+        assert_eq!(BoardOrientation::from_color(ChessColor::Black), BoardOrientation::Black);
+    }
 }

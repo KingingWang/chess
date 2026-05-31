@@ -28,37 +28,40 @@ mod net_bridge;
 mod ui;
 
 use bevy::prelude::*;
+use bevy::text::Font;
 
-use app_state::{AppState, AiSettings, CoreGame, Selection};
+use app_state::{AiSettings, AppState, BoardOrientation, CoreGame, Selection};
 use async_runtime::AsyncRuntime;
 use board_view::RenderDirty;
+
+/// CJK fonts embedded directly into the binary via `include_bytes!` so the
+/// game runs from a single self-contained executable (no external `assets/`
+/// directory required at runtime).
+const CJK_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/cjk.otf");
+const CJK_BOLD: &[u8] = include_bytes!("../../../assets/fonts/cjk-bold.otf");
+
+
+/// Reset the board orientation back to Red when returning to the menu so that
+/// a subsequent local / VsAi game does not inherit a flipped board from a
+/// previous networked session where the local player was Black.
+fn reset_board_orientation(mut orient: ResMut<BoardOrientation>) {
+    *orient = BoardOrientation::Red;
+}
 
 /// A single persistent 2D camera that renders both the menu UI and the board.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-/// Resolve the directory that holds the bundled `assets/` folder.
+/// Parse the embedded font bytes into a [`Font`] asset and return its handle.
 ///
-/// Order of preference (so the game runs "out of the box" both in development
-/// and from a packaged release on any platform):
-/// 1. `assets/` sitting next to the executable (the distribution layout).
-/// 2. the workspace `assets/` baked in at compile time (development).
-/// 3. plain `assets` relative to the current working directory.
-fn resolve_asset_root() -> String {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("assets");
-            if candidate.is_dir() {
-                return candidate.to_string_lossy().into_owned();
-            }
-        }
-    }
-    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets");
-    if std::path::Path::new(workspace).is_dir() {
-        return workspace.to_string();
-    }
-    "assets".to_string()
+/// Panics with a clear message if the bytes are not a valid font; this is a
+/// build-time invariant (the bytes are baked into the binary), so a panic
+/// here means the source asset itself is broken.
+fn embed_font(world: &mut World, bytes: &'static [u8], label: &str) -> Handle<Font> {
+    let font = Font::try_from_bytes(bytes.to_vec())
+        .unwrap_or_else(|e| panic!("embedded CJK font `{label}` failed to parse: {e:?}"));
+    world.resource_mut::<Assets<Font>>().add(font)
 }
 
 /// Load the relay client configuration with precedence
@@ -79,30 +82,22 @@ fn load_relay_config() -> net_bridge::RelayConfig {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "中国象棋 Xiangqi".into(),
-                    resolution: bevy::window::WindowResolution::new(1280, 800),
-                    ..default()
-                }),
-                ..default()
-            })
-            .set(bevy::asset::AssetPlugin {
-                file_path: resolve_asset_root(),
-                ..default()
-            }),
-    );
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "中国象棋 Xiangqi".into(),
+            resolution: bevy::window::WindowResolution::new(1280, 800),
+            ..default()
+        }),
+        ..default()
+    }));
 
-    // Load the bundled CJK fonts up front (order-independent) so the very first
-    // menu/board UI renders Chinese text immediately.
+    // Register the embedded CJK fonts so the very first menu/board UI renders
+    // Chinese text immediately, with no dependency on an external assets dir.
     {
-        let assets = app.world().resource::<AssetServer>().clone();
-        app.insert_resource(app_state::UiFonts {
-            regular: assets.load("fonts/cjk.otf"),
-            bold: assets.load("fonts/cjk-bold.otf"),
-        });
+        let world = app.world_mut();
+        let regular = embed_font(world, CJK_REGULAR, "cjk.otf");
+        let bold = embed_font(world, CJK_BOLD, "cjk-bold.otf");
+        app.insert_resource(app_state::UiFonts { regular, bold });
     }
 
     app.init_state::<AppState>()
@@ -110,6 +105,7 @@ fn main() {
         .init_resource::<Selection>()
         .init_resource::<AiSettings>()
         .init_resource::<RenderDirty>()
+        .init_resource::<BoardOrientation>()
         .init_resource::<lan_dialog::LanDialog>()
         .init_resource::<ai_bridge::AiTask>()
         .insert_resource(AsyncRuntime::new())
@@ -117,7 +113,7 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.07, 0.07, 0.09)))
         .add_systems(Startup, setup_camera)
         // Menu state.
-        .add_systems(OnEnter(AppState::Menu), ui::setup_menu)
+        .add_systems(OnEnter(AppState::Menu), (ui::setup_menu, reset_board_orientation))
         .add_systems(
             OnExit(AppState::Menu),
             (ui::teardown_menu, lan_dialog::teardown_lan_dialog),
@@ -164,4 +160,23 @@ fn main() {
                 .run_if(in_state(AppState::InGame)),
         )
         .run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_fonts_are_present() {
+        assert!(!CJK_REGULAR.is_empty(), "regular font bytes empty");
+        assert!(!CJK_BOLD.is_empty(), "bold font bytes empty");
+    }
+
+    #[test]
+    fn embedded_fonts_parse() {
+        Font::try_from_bytes(CJK_REGULAR.to_vec())
+            .expect("embedded CJK regular font failed to parse");
+        Font::try_from_bytes(CJK_BOLD.to_vec())
+            .expect("embedded CJK bold font failed to parse");
+    }
 }

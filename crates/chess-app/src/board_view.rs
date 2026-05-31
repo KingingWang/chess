@@ -9,7 +9,9 @@
 use bevy::prelude::*;
 use chess_core::Color as ChessColor;
 
-use crate::app_state::{square_to_world, CoreGame, Selection, UiFonts, CELL, PIECE_RADIUS};
+use crate::app_state::{
+    square_to_world, BoardOrientation, CoreGame, Selection, UiFonts, CELL, PIECE_RADIUS,
+};
 
 /// Set to `true` by any system that mutates the game; the render system redraws
 /// pieces and clears the flag.
@@ -51,7 +53,9 @@ fn spawn_line(commands: &mut Commands, center: Vec2, size: Vec2) {
 
 /// A small "star point" cross mark at a board intersection.
 fn spawn_star(commands: &mut Commands, sq: chess_core::Square) {
-    let p = square_to_world(sq);
+    // Star positions are symmetric across both sides of the river, so the
+    // orientation does not affect them; we always use Red here.
+    let p = square_to_world(sq, BoardOrientation::Red);
     let bar = 10.0;
     let thin = 2.0;
     for (w, h) in [(bar, thin), (thin, bar)] {
@@ -133,8 +137,14 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
     // Palace diagonals (both palaces).
     for &(r0, r1) in &[(0u8, 2u8), (7u8, 9u8)] {
         for &(f_a, f_b) in &[(3u8, 5u8), (5u8, 3u8)] {
-            let a = square_to_world(chess_core::Square::new(f_a, r0).unwrap());
-            let b = square_to_world(chess_core::Square::new(f_b, r1).unwrap());
+            let a = square_to_world(
+                chess_core::Square::new(f_a, r0).unwrap(),
+                BoardOrientation::Red,
+            );
+            let b = square_to_world(
+                chess_core::Square::new(f_b, r1).unwrap(),
+                BoardOrientation::Red,
+            );
             let mid = (a + b) * 0.5;
             let delta = b - a;
             let len = delta.length();
@@ -203,10 +213,12 @@ pub fn redraw_pieces(
     core: Res<CoreGame>,
     selection: Res<Selection>,
     fonts: Res<UiFonts>,
+    orient: Res<BoardOrientation>,
     existing: Query<Entity, Or<(With<PieceMarker>, With<HighlightMarker>)>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    let orient = *orient;
     if !dirty.0 {
         return;
     }
@@ -218,7 +230,7 @@ pub fn redraw_pieces(
 
     // Selection highlight + legal destination dots.
     if let Some(from) = selection.from {
-        let pos = square_to_world(from);
+        let pos = square_to_world(from, orient);
         commands.spawn((
             Sprite {
                 color: Color::srgba(0.95, 0.78, 0.30, 0.35),
@@ -229,7 +241,7 @@ pub fn redraw_pieces(
             HighlightMarker,
         ));
         for mv in core.game.legal_moves().into_iter().filter(|m| m.from == from) {
-            let p = square_to_world(mv.to);
+            let p = square_to_world(mv.to, orient);
             commands.spawn((
                 Mesh2d(meshes.add(Circle::new(7.0))),
                 MeshMaterial2d(materials.add(Color::srgba(0.15, 0.55, 0.25, 0.85))),
@@ -244,7 +256,7 @@ pub fn redraw_pieces(
     let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.28));
 
     for (sq, piece) in core.game.board().pieces() {
-        let pos = square_to_world(sq);
+        let pos = square_to_world(sq, orient);
         let ink = match piece.color {
             ChessColor::Red => RED_INK,
             ChessColor::Black => BLACK_INK,
