@@ -62,7 +62,10 @@ impl Session {
     }
 
     /// Run the guest side of the handshake: receive our assigned color, echo it.
-    pub async fn handshake_as_guest(mut conn: Connection, name: &str) -> Result<Session, HandshakeError> {
+    pub async fn handshake_as_guest(
+        mut conn: Connection,
+        name: &str,
+    ) -> Result<Session, HandshakeError> {
         let my_color = guest_handshake_on(&mut conn, name).await?;
         Ok(Session {
             conn,
@@ -136,7 +139,9 @@ impl Session {
     /// when a guest (re)connects so it picks up the move history in progress.
     pub async fn send_sync(&mut self, game: chess_core::Game) -> Result<(), NetError> {
         self.conn
-            .send(&Message::Sync { game: Box::new(game) })
+            .send(&Message::Sync {
+                game: Box::new(game),
+            })
             .await
     }
 
@@ -164,8 +169,7 @@ pub async fn host_handshake_on(
     .await?;
 
     match conn.recv_event().await? {
-        InboundEvent::Message(Message::Hello { version, .. })
-            if version == PROTOCOL_VERSION => {}
+        InboundEvent::Message(Message::Hello { version, .. }) if version == PROTOCOL_VERSION => {}
         InboundEvent::Message(Message::Hello { version, .. }) => {
             return Err(HandshakeError::Version {
                 local: PROTOCOL_VERSION,
@@ -177,9 +181,7 @@ pub async fn host_handshake_on(
         // handshake (most often: wrong password → guest couldn't decrypt our
         // Hello and disconnected). The conn (our link to the server) is still
         // alive; the caller may loop back and wait for the next guest.
-        InboundEvent::PeerLeft | InboundEvent::PeerJoined => {
-            return Err(HandshakeError::PeerLeft)
-        }
+        InboundEvent::PeerLeft | InboundEvent::PeerJoined => return Err(HandshakeError::PeerLeft),
     }
     Ok(())
 }
@@ -203,9 +205,7 @@ pub async fn guest_handshake_on(
             })
         }
         InboundEvent::Message(other) => return Err(HandshakeError::Unexpected(other)),
-        InboundEvent::PeerLeft | InboundEvent::PeerJoined => {
-            return Err(HandshakeError::PeerLeft)
-        }
+        InboundEvent::PeerLeft | InboundEvent::PeerJoined => return Err(HandshakeError::PeerLeft),
     };
 
     conn.send(&Message::Hello {

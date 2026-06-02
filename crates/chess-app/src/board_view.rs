@@ -228,6 +228,23 @@ pub fn redraw_pieces(
         commands.entity(e).despawn();
     }
 
+    // Last-move highlight: jade-green rings around the from/to squares.
+    if let Some((lm_from, lm_to)) = core.last_move {
+        let ring_inner = PIECE_RADIUS + 1.0;
+        let ring_outer = PIECE_RADIUS + 5.0;
+        let ring_mesh = meshes.add(Annulus::new(ring_inner, ring_outer));
+        let ring_mat = materials.add(Color::srgba(0.18, 0.72, 0.38, 0.90));
+        for sq in [lm_from, lm_to] {
+            let pos = square_to_world(sq, orient);
+            commands.spawn((
+                Mesh2d(ring_mesh.clone()),
+                MeshMaterial2d(ring_mat.clone()),
+                Transform::from_xyz(pos.x, pos.y, 11.0),
+                HighlightMarker,
+            ));
+        }
+    }
+
     // Selection highlight + legal destination dots.
     if let Some(from) = selection.from {
         let pos = square_to_world(from, orient);
@@ -240,7 +257,12 @@ pub fn redraw_pieces(
             Transform::from_xyz(pos.x, pos.y, 5.0),
             HighlightMarker,
         ));
-        for mv in core.game.legal_moves().into_iter().filter(|m| m.from == from) {
+        for mv in core
+            .game
+            .legal_moves()
+            .into_iter()
+            .filter(|m| m.from == from)
+        {
             let p = square_to_world(mv.to, orient);
             commands.spawn((
                 Mesh2d(meshes.add(Circle::new(7.0))),

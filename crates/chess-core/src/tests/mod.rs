@@ -208,7 +208,7 @@ fn detects_checkmate() {
     b.set_piece(sq(3, 0), Some(Piece::new(Color::Red, PieceKind::Chariot))); // file d
     b.set_piece(sq(5, 0), Some(Piece::new(Color::Red, PieceKind::Chariot))); // file f
     b.set_piece(sq(4, 0), Some(Piece::new(Color::Red, PieceKind::Chariot))); // file e, checks
-    // Red king tucked away off the relevant files.
+                                                                             // Red king tucked away off the relevant files.
     b.set_piece(sq(0, 0), Some(Piece::new(Color::Red, PieceKind::King)));
     b.set_side_to_move(Color::Black);
 

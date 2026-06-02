@@ -114,7 +114,10 @@ mod tests {
         let mut g = Game::new();
         let mv = Move::from_iccs("b2e2").unwrap();
         g.make_move(mv).unwrap();
-        let line = (Message::Sync { game: Box::new(g.clone()) }).to_line();
+        let line = (Message::Sync {
+            game: Box::new(g.clone()),
+        })
+        .to_line();
         match Message::from_line(&line).unwrap() {
             Message::Sync { game } => {
                 assert_eq!(game.history_len(), 1);

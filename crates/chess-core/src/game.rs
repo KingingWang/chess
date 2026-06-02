@@ -128,7 +128,11 @@ impl Game {
         let undo = self.board.make_move(mv);
         let gave_check = self.board.is_in_check(mover.opponent());
 
-        self.halfmove_clock = if was_capture { 0 } else { self.halfmove_clock + 1 };
+        self.halfmove_clock = if was_capture {
+            0
+        } else {
+            self.halfmove_clock + 1
+        };
         self.history.push(HistoryEntry {
             undo,
             fen_before,

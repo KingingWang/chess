@@ -1,7 +1,7 @@
 //! Application-level states, modes, and shared resources.
 
 use bevy::prelude::*;
-use chess_core::{Color as ChessColor, Game};
+use chess_core::{Color as ChessColor, Game, Square};
 
 /// Top-level UI flow.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -85,6 +85,8 @@ pub struct CoreGame {
     /// host is waiting for them (or a new joiner with the same room/password)
     /// to reconnect. Input is frozen and the HUD shows a reconnect notice.
     pub peer_disconnected: bool,
+    /// The last move played (from, to) — used for board highlighting.
+    pub last_move: Option<(Square, Square)>,
 }
 
 impl Default for CoreGame {
@@ -98,6 +100,7 @@ impl Default for CoreGame {
             awaiting_peer: false,
             connected: false,
             peer_disconnected: false,
+            last_move: None,
         }
     }
 }
@@ -118,6 +121,7 @@ impl CoreGame {
     /// Reset to a fresh game keeping the mode/color.
     pub fn restart(&mut self) {
         self.game = Game::new();
+        self.last_move = None;
     }
 }
 
@@ -209,14 +213,22 @@ mod tests {
     fn black_orientation_puts_rank_zero_at_top() {
         let sq = Square::new(4, 0).unwrap();
         let p = square_to_world(sq, BoardOrientation::Black);
-        assert!(p.y > 0.0, "Black orientation must place Red rank 0 at top, got y={}", p.y);
+        assert!(
+            p.y > 0.0,
+            "Black orientation must place Red rank 0 at top, got y={}",
+            p.y
+        );
     }
 
     #[test]
     fn black_orientation_puts_black_back_rank_at_bottom() {
         let sq = Square::new(4, 9).unwrap(); // Black general
         let p = square_to_world(sq, BoardOrientation::Black);
-        assert!(p.y < 0.0, "Black rank 9 must be at bottom under Black orientation, got y={}", p.y);
+        assert!(
+            p.y < 0.0,
+            "Black rank 9 must be at bottom under Black orientation, got y={}",
+            p.y
+        );
     }
 
     #[test]
@@ -250,7 +262,13 @@ mod tests {
 
     #[test]
     fn orientation_from_color_matches_color() {
-        assert_eq!(BoardOrientation::from_color(ChessColor::Red), BoardOrientation::Red);
-        assert_eq!(BoardOrientation::from_color(ChessColor::Black), BoardOrientation::Black);
+        assert_eq!(
+            BoardOrientation::from_color(ChessColor::Red),
+            BoardOrientation::Red
+        );
+        assert_eq!(
+            BoardOrientation::from_color(ChessColor::Black),
+            BoardOrientation::Black
+        );
     }
 }

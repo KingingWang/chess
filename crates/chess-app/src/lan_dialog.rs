@@ -98,7 +98,9 @@ impl LanDialog {
     /// The fields shown for the current transport + role, in display order.
     fn fields(&self) -> Vec<(&'static str, LanField)> {
         match (self.transport, self.is_host) {
-            (Transport::Lan, true) => vec![("端口", LanField::Port), ("房间密码", LanField::Password)],
+            (Transport::Lan, true) => {
+                vec![("端口", LanField::Port), ("房间密码", LanField::Password)]
+            }
             (Transport::Lan, false) => vec![
                 ("主机 IP", LanField::Ip),
                 ("端口", LanField::Port),
@@ -418,7 +420,11 @@ pub fn lan_dialog_buttons(
     mut fields: Query<(&Interaction, &LanFieldButton), (Changed<Interaction>, Without<LanAction>)>,
     mut toggle: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<LanTransportToggle>, Without<LanAction>),
+        (
+            Changed<Interaction>,
+            With<LanTransportToggle>,
+            Without<LanAction>,
+        ),
     >,
     mut actions: Query<
         (&Interaction, &LanAction, &mut BackgroundColor),
@@ -515,7 +521,10 @@ fn accept_char(field: LanField, len: usize, ch: char) -> bool {
 /// the transport label, and show any error.
 pub fn lan_dialog_render(
     dialog: Res<LanDialog>,
-    mut texts: Query<(&LanFieldText, &mut Text), (Without<LanErrorText>, Without<LanTransportText>)>,
+    mut texts: Query<
+        (&LanFieldText, &mut Text),
+        (Without<LanErrorText>, Without<LanTransportText>),
+    >,
     mut field_styles: Query<(&LanFieldButton, &mut BackgroundColor, &mut BorderColor)>,
     mut toggle_text: Query<&mut Text, (With<LanTransportText>, Without<LanErrorText>)>,
     mut err: Query<&mut Text, With<LanErrorText>>,
@@ -620,7 +629,14 @@ fn submit_lan(
         )
     };
 
-    start_game(core, next, GameSetup { mode, room_code: None });
+    start_game(
+        core,
+        next,
+        GameSetup {
+            mode,
+            room_code: None,
+        },
+    );
     let link = start_net(
         &runtime.0,
         target,
@@ -789,7 +805,10 @@ mod tests {
             .spawn((Interaction::Pressed, LanFieldButton(LanField::Password)));
         app.update();
 
-        assert_eq!(app.world().resource::<LanDialog>().focus, LanField::Password);
+        assert_eq!(
+            app.world().resource::<LanDialog>().focus,
+            LanField::Password
+        );
     }
 
     #[test]

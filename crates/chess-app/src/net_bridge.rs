@@ -18,8 +18,8 @@ use chess_core::{Color as ChessColor, Game, Move};
 use crate::app_state::{AppState, BoardOrientation, GameMode};
 use crate::lan_dialog::LanDialog;
 use chess_net::{
-    host_handshake_on, wait_for_peer_joined, Connection, HandshakeError, InboundEvent,
-    Message, NetError, RelayClientConfig, Role, Server, Session,
+    host_handshake_on, wait_for_peer_joined, Connection, HandshakeError, InboundEvent, Message,
+    NetError, RelayClientConfig, Role, Server, Session,
 };
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
@@ -35,7 +35,10 @@ pub enum NetTarget {
     /// Create a relayed room on the relay server.
     RelayHost { cfg: RelayClientConfig },
     /// Join a relayed room by number on the relay server.
-    RelayJoin { cfg: RelayClientConfig, room: String },
+    RelayJoin {
+        cfg: RelayClientConfig,
+        room: String,
+    },
 }
 
 /// Command sent from Bevy -> the network task.
@@ -56,7 +59,9 @@ pub enum NetEvent {
     RoomCreated(String),
     /// A peer has completed the handshake. Sent on the first connection and
     /// again on every host-side reconnect.
-    Connected { my_color: ChessColor },
+    Connected {
+        my_color: ChessColor,
+    },
     /// The currently-connected peer disconnected; the host is waiting for the
     /// next joiner. Does **not** tear down the session.
     PeerDisconnected,
@@ -281,7 +286,11 @@ async fn run_guest_lan(
     use tokio::time::{timeout, Duration};
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 
-    let res = timeout(CONNECT_TIMEOUT, Session::join(addr.as_str(), &name, &password)).await;
+    let res = timeout(
+        CONNECT_TIMEOUT,
+        Session::join(addr.as_str(), &name, &password),
+    )
+    .await;
     let mut session = match res {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
@@ -290,7 +299,9 @@ async fn run_guest_lan(
             return;
         }
         Err(_) => {
-            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Error(
+                "handshake failed: timed out while connecting".into(),
+            ));
             let _ = evt_tx.send(NetEvent::Disconnected);
             return;
         }
@@ -333,7 +344,9 @@ async fn run_host_relay(
             return;
         }
         Err(_) => {
-            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Error(
+                "handshake failed: timed out while connecting".into(),
+            ));
             let _ = evt_tx.send(NetEvent::Disconnected);
             return;
         }
@@ -441,7 +454,9 @@ async fn run_guest_relay(
             return;
         }
         Err(_) => {
-            let _ = evt_tx.send(NetEvent::Error("handshake failed: timed out while connecting".into()));
+            let _ = evt_tx.send(NetEvent::Error(
+                "handshake failed: timed out while connecting".into(),
+            ));
             let _ = evt_tx.send(NetEvent::Disconnected);
             return;
         }
@@ -467,9 +482,7 @@ async fn run_guest_relay(
 /// established (server down, room missing, wrong password, host absent, ...).
 fn connect_error_message(mode: GameMode) -> String {
     match mode {
-        GameMode::RelayJoin => {
-            "加入失败：服务器未启动、房间不存在或密码错误".to_string()
-        }
+        GameMode::RelayJoin => "加入失败：服务器未启动、房间不存在或密码错误".to_string(),
         GameMode::RelayHost => "创建失败：无法连接中继服务器".to_string(),
         GameMode::LanJoin => {
             "连接失败：找不到主机（请确认对方已创建房间，且 IP/端口正确）".to_string()
@@ -532,9 +545,7 @@ pub fn poll_net_events(
                 // Hosts push their authoritative game state so a (re)joining
                 // guest can resume the match from the current position.
                 if core.mode.is_net_host() {
-                    let _ = link
-                        .out
-                        .send(NetCommand::Sync(Box::new(core.game.clone())));
+                    let _ = link.out.send(NetCommand::Sync(Box::new(core.game.clone())));
                 }
             }
             NetEvent::PeerSync(game) => {
@@ -748,7 +759,9 @@ mod tests {
         app.insert_resource(core);
         // Build a host-side game with one move played.
         let mut host_game = Game::new();
-        host_game.make_move(Move::from_iccs("h2e2").unwrap()).unwrap();
+        host_game
+            .make_move(Move::from_iccs("h2e2").unwrap())
+            .unwrap();
         let (link, _cmd_rx) = link_with(NetEvent::PeerSync(Box::new(host_game.clone())));
         app.insert_resource(link);
 

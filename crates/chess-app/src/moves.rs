@@ -10,6 +10,7 @@ use crate::app_state::CoreGame;
 pub fn apply_local_move(core: &mut CoreGame, mv: Move) -> Option<GameResult> {
     match core.game.make_move(mv) {
         Ok(result) => {
+            core.last_move = Some((mv.from, mv.to));
             bevy::log::info!(mv = %mv.to_iccs(), "move applied");
             result
         }

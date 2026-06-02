@@ -28,8 +28,7 @@ const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
 /// The relay-side WebSocket stream type (client end of a TLS tunnel).
-pub(crate) type WsClient =
-    WebSocketStream<tokio_rustls::client::TlsStream<TcpStream>>;
+pub(crate) type WsClient = WebSocketStream<tokio_rustls::client::TlsStream<TcpStream>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum NetError {

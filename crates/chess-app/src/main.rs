@@ -40,7 +40,6 @@ use board_view::RenderDirty;
 const CJK_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/cjk.otf");
 const CJK_BOLD: &[u8] = include_bytes!("../../../assets/fonts/cjk-bold.otf");
 
-
 /// Reset the board orientation back to Red when returning to the menu so that
 /// a subsequent local / VsAi game does not inherit a flipped board from a
 /// previous networked session where the local player was Black.
@@ -113,7 +112,10 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.07, 0.07, 0.09)))
         .add_systems(Startup, setup_camera)
         // Menu state.
-        .add_systems(OnEnter(AppState::Menu), (ui::setup_menu, reset_board_orientation))
+        .add_systems(
+            OnEnter(AppState::Menu),
+            (ui::setup_menu, reset_board_orientation),
+        )
         .add_systems(
             OnExit(AppState::Menu),
             (ui::teardown_menu, lan_dialog::teardown_lan_dialog),
@@ -176,7 +178,6 @@ mod tests {
     fn embedded_fonts_parse() {
         Font::try_from_bytes(CJK_REGULAR.to_vec())
             .expect("embedded CJK regular font failed to parse");
-        Font::try_from_bytes(CJK_BOLD.to_vec())
-            .expect("embedded CJK bold font failed to parse");
+        Font::try_from_bytes(CJK_BOLD.to_vec()).expect("embedded CJK bold font failed to parse");
     }
 }

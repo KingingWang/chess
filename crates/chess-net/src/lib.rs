@@ -16,6 +16,7 @@ pub mod protocol;
 pub mod relay;
 pub mod session;
 
+pub use connection::InboundEvent;
 pub use connection::{connect, Connection, NetError, Server};
 pub use crypto::Cipher;
 pub use protocol::{Message, WireMove, PROTOCOL_VERSION};
@@ -23,10 +24,8 @@ pub use relay::{
     ControlMsg, PendingRelayHost, RelayClientConfig, RelayError, DEFAULT_RELAY_HOST,
     DEFAULT_RELAY_PORT,
 };
-pub use connection::InboundEvent;
 pub use session::{
-    guest_handshake_on, host_handshake_on, wait_for_peer_joined, HandshakeError, Role,
-    Session,
+    guest_handshake_on, host_handshake_on, wait_for_peer_joined, HandshakeError, Role, Session,
 };
 
 #[cfg(test)]

@@ -76,6 +76,7 @@ pub fn handle_click(
             let mv = Move::new(from, clicked);
             if core.game.make_move(mv).is_ok() {
                 selection.from = None;
+                core.last_move = Some((mv.from, mv.to));
                 dirty.0 = true;
                 // Forward to peer in any networked mode (LAN or relay).
                 if core.mode.is_networked() {

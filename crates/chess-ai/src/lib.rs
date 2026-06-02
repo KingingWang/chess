@@ -122,7 +122,7 @@ impl Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chess_core::{Color, PieceKind, Piece, Square};
+    use chess_core::{Color, Piece, PieceKind, Square};
 
     fn sq(f: u8, r: u8) -> Square {
         Square::new(f, r).unwrap()
@@ -140,7 +140,13 @@ mod tests {
         b.set_piece(sq(0, 0), Some(Piece::new(Color::Red, PieceKind::King)));
         b.set_side_to_move(Color::Red);
 
-        let res = search::search(&b, SearchLimits { movetime: Duration::from_secs(2), max_depth: 4 });
+        let res = search::search(
+            &b,
+            SearchLimits {
+                movetime: Duration::from_secs(2),
+                max_depth: 4,
+            },
+        );
         let mv = res.best_move.expect("a move");
         // Apply and check it is mate.
         let mut bb = b.clone();
@@ -158,9 +164,19 @@ mod tests {
         b.set_piece(sq(4, 4), Some(Piece::new(Color::Black, PieceKind::Chariot)));
         b.set_side_to_move(Color::Red);
 
-        let res = search::search(&b, SearchLimits { movetime: Duration::from_millis(500), max_depth: 6 });
+        let res = search::search(
+            &b,
+            SearchLimits {
+                movetime: Duration::from_millis(500),
+                max_depth: 6,
+            },
+        );
         let mv = res.best_move.expect("a move");
-        assert_eq!(mv, Move::new(sq(0, 4), sq(4, 4)), "should grab the free chariot");
+        assert_eq!(
+            mv,
+            Move::new(sq(0, 4), sq(4, 4)),
+            "should grab the free chariot"
+        );
     }
 
     #[tokio::test]
@@ -168,7 +184,14 @@ mod tests {
         let mut ai = Ai::builtin();
         let b = Board::start_position();
         let mv = ai
-            .best_move(&b, &[], SearchLimits { movetime: Duration::from_millis(300), max_depth: 4 })
+            .best_move(
+                &b,
+                &[],
+                SearchLimits {
+                    movetime: Duration::from_millis(300),
+                    max_depth: 4,
+                },
+            )
             .await;
         assert!(mv.is_some());
     }

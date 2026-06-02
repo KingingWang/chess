@@ -57,9 +57,7 @@ impl Board {
 
     /// The standard opening position.
     pub fn start_position() -> Board {
-        crate::fen::START_FEN
-            .parse()
-            .expect("START_FEN is valid")
+        crate::fen::START_FEN.parse().expect("START_FEN is valid")
     }
 
     #[inline]
@@ -316,10 +314,7 @@ impl Board {
     /// Would the generals "face" each other along an open file? This is illegal
     /// (the "flying general" / 白脸将 rule).
     pub fn generals_face(&self) -> bool {
-        let (rk, bk) = match (
-            self.king_square(Color::Red),
-            self.king_square(Color::Black),
-        ) {
+        let (rk, bk) = match (self.king_square(Color::Red), self.king_square(Color::Black)) {
             (Some(a), Some(b)) => (a, b),
             _ => return false,
         };
@@ -431,9 +426,7 @@ impl Board {
         for df in [-1i8, 1] {
             if let Some(from) = Square::try_new(tf + df, tr) {
                 if let Some(p) = self.squares[from.index()] {
-                    if p.color == by
-                        && p.kind == PieceKind::Pawn
-                        && square::crossed_river(from, by)
+                    if p.color == by && p.kind == PieceKind::Pawn && square::crossed_river(from, by)
                     {
                         return true;
                     }

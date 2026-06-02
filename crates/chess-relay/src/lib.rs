@@ -42,8 +42,8 @@ pub const ROOM_TIMEOUT: Duration = Duration::from_secs(600);
 pub async fn run() -> anyhow::Result<()> {
     let config_path = parse_config_arg()?;
     let cfg = Config::load(config_path.as_deref())?;
-    let acceptor =
-        build_acceptor(&cfg.cert, &cfg.key).context("building TLS acceptor (check cert/key paths)")?;
+    let acceptor = build_acceptor(&cfg.cert, &cfg.key)
+        .context("building TLS acceptor (check cert/key paths)")?;
 
     let addr = cfg.listen_addr();
     let listener = TcpListener::bind(&addr)
@@ -154,12 +154,7 @@ async fn handle_create(ws: WsServer, salt: String, rooms: Rooms) -> anyhow::Resu
     let mut first = true;
     loop {
         let next = if first {
-            match tokio::time::timeout(
-                ROOM_TIMEOUT,
-                wait_next_guest(&mut rx, &mut host_rx),
-            )
-            .await
-            {
+            match tokio::time::timeout(ROOM_TIMEOUT, wait_next_guest(&mut rx, &mut host_rx)).await {
                 Ok(v) => v,
                 Err(_) => {
                     let _ = send_control_tx(
@@ -227,8 +222,7 @@ async fn handle_join(mut ws: WsServer, room: String, rooms: Rooms) -> anyhow::Re
             let _ = send_control(
                 &mut ws,
                 &ControlMsg::Error {
-                    msg: "another player is already in this room; try again later"
-                        .to_string(),
+                    msg: "another player is already in this room; try again later".to_string(),
                 },
             )
             .await;

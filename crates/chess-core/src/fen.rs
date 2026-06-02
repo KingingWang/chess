@@ -11,8 +11,7 @@ use crate::piece::{Color, Piece};
 use crate::square::{Square, FILES, RANKS};
 
 /// Standard opening position.
-pub const START_FEN: &str =
-    "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
+pub const START_FEN: &str = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum FenError {

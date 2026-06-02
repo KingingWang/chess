@@ -3,7 +3,8 @@
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, GameResult, WinReason};
 
-use crate::app_state::{AppState, CoreGame, GameMode, UiFonts};
+use crate::ai_bridge::AiTask;
+use crate::app_state::{AppState, CoreGame, GameMode, Selection, UiFonts};
 use crate::board_view::RenderDirty;
 use crate::lan_dialog::LanDialog;
 use crate::net_bridge::{NetCommand, NetLink};
@@ -172,6 +173,7 @@ pub enum HudAction {
     NewGame,
     Resign,
     OfferDraw,
+    Undo,
     BackToMenu,
 }
 
@@ -233,6 +235,7 @@ pub fn setup_hud(mut commands: Commands, fonts: Res<UiFonts>) {
                     ("新 对 局", HudAction::NewGame),
                     ("认 输", HudAction::Resign),
                     ("求 和", HudAction::OfferDraw),
+                    ("悔 棋", HudAction::Undo),
                     ("返回主菜单", HudAction::BackToMenu),
                 ] {
                     panel
@@ -276,7 +279,8 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
         // holding for the peer to come back (LAN: same port; relay: same
         // room number).
         **text = "对方已断开
-等待重连…".to_string();
+等待重连…"
+            .to_string();
         return;
     }
     if core.awaiting_peer {
@@ -329,13 +333,13 @@ pub fn update_status(core: Res<CoreGame>, mut q: Query<&mut Text, With<StatusTex
     **text = status;
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn hud_interaction(
-    mut interactions: Query<
-        (&Interaction, &HudAction, &mut BackgroundColor),
-        Changed<Interaction>,
-    >,
+    mut interactions: Query<(&Interaction, &HudAction, &mut BackgroundColor), Changed<Interaction>>,
     mut core: ResMut<CoreGame>,
     mut dirty: ResMut<RenderDirty>,
+    mut selection: ResMut<Selection>,
+    mut ai_task: ResMut<AiTask>,
     mut next: ResMut<NextState<AppState>>,
     net: Option<Res<NetLink>>,
 ) {
@@ -344,6 +348,8 @@ pub fn hud_interaction(
             Interaction::Pressed => match action {
                 HudAction::NewGame => {
                     core.restart();
+                    selection.from = None;
+                    ai_task.rx = None;
                     dirty.0 = true;
                     // Hosts of a networked game must broadcast the reset so
                     // the connected guest also restarts (otherwise the two
@@ -376,6 +382,27 @@ pub fn hud_interaction(
                         core.game.agree_draw();
                         dirty.0 = true;
                     }
+                }
+                HudAction::Undo => {
+                    // Networked games do not support undo (would require
+                    // peer negotiation which is out of scope).
+                    if core.mode.is_networked() || core.game.history_len() == 0 {
+                        continue;
+                    }
+                    // Cancel any in-flight AI task so it does not apply a
+                    // stale move after we rewind.
+                    ai_task.rx = None;
+                    // In VsAi, undo two plies (AI + human) so the player
+                    // gets to redo their own move. In LocalPvp, undo one.
+                    if core.mode == GameMode::VsAi {
+                        core.game.undo(); // undo AI's move
+                        core.game.undo(); // undo player's move
+                    } else {
+                        core.game.undo();
+                    }
+                    selection.from = None;
+                    core.last_move = None;
+                    dirty.0 = true;
                 }
                 HudAction::BackToMenu => {
                     next.set(AppState::Menu);

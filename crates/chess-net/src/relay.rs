@@ -190,9 +190,7 @@ impl RelayClientConfig {
         } else {
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         }
-        Ok(builder
-            .with_root_certificates(roots)
-            .with_no_client_auth())
+        Ok(builder.with_root_certificates(roots).with_no_client_auth())
     }
 
     /// Open a TLS + WebSocket tunnel to the relay server.
@@ -279,11 +277,21 @@ pub async fn relay_create(
     let mut ws = cfg.ws_connect().await?;
     let salt = crate::crypto::random_salt();
 
-    send_control(&mut ws, &ControlMsg::Create { salt: B64.encode(salt) }).await?;
+    send_control(
+        &mut ws,
+        &ControlMsg::Create {
+            salt: B64.encode(salt),
+        },
+    )
+    .await?;
     let room = match recv_control(&mut ws).await? {
         ControlMsg::Created { room } => room,
         ControlMsg::Error { msg } => return Err(RelayError::Server(msg)),
-        other => return Err(RelayError::Protocol(format!("expected created, got {other:?}"))),
+        other => {
+            return Err(RelayError::Protocol(format!(
+                "expected created, got {other:?}"
+            )))
+        }
     };
 
     let cipher = Cipher::from_password_salt(password, &salt);
@@ -299,11 +307,21 @@ pub async fn relay_join(
 ) -> Result<Connection, RelayError> {
     let mut ws = cfg.ws_connect().await?;
 
-    send_control(&mut ws, &ControlMsg::Join { room: room.to_string() }).await?;
+    send_control(
+        &mut ws,
+        &ControlMsg::Join {
+            room: room.to_string(),
+        },
+    )
+    .await?;
     let salt_b64 = match recv_control(&mut ws).await? {
         ControlMsg::Joined { salt } => salt,
         ControlMsg::Error { msg } => return Err(RelayError::Server(msg)),
-        other => return Err(RelayError::Protocol(format!("expected joined, got {other:?}"))),
+        other => {
+            return Err(RelayError::Protocol(format!(
+                "expected joined, got {other:?}"
+            )))
+        }
     };
     let salt = B64
         .decode(salt_b64.as_bytes())
@@ -371,12 +389,22 @@ mod tests {
     #[test]
     fn control_msg_json_roundtrip() {
         let msgs = vec![
-            ControlMsg::Create { salt: "c2FsdA==".into() },
-            ControlMsg::Created { room: "12345678".into() },
-            ControlMsg::Join { room: "12345678".into() },
-            ControlMsg::Joined { salt: "c2FsdA==".into() },
+            ControlMsg::Create {
+                salt: "c2FsdA==".into(),
+            },
+            ControlMsg::Created {
+                room: "12345678".into(),
+            },
+            ControlMsg::Join {
+                room: "12345678".into(),
+            },
+            ControlMsg::Joined {
+                salt: "c2FsdA==".into(),
+            },
             ControlMsg::PeerJoined,
-            ControlMsg::Error { msg: "no such room".into() },
+            ControlMsg::Error {
+                msg: "no such room".into(),
+            },
         ];
         for m in msgs {
             let s = serde_json::to_string(&m).unwrap();
