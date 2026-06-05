@@ -1,16 +1,21 @@
 //! Mouse input: click a piece to select it, click a destination to move.
-//! Moves are validated by the rules engine; in networked games a legal local
-//! move is also forwarded to the peer.
+//! Right-click deselects. Moves are validated by the rules engine; in
+//! networked games a legal local move is also forwarded to the peer.
 
 use bevy::prelude::*;
 use chess_core::Move;
 
+use crate::animation::{spawn_invalid_flash, AnimationPlaying};
 use crate::app_state::{world_to_square, BoardOrientation, CoreGame, Selection};
 use crate::board_view::RenderDirty;
+use crate::drag::DragState;
+use crate::history_view::HistoryView;
 use crate::net_bridge::{NetCommand, NetLink};
+use crate::sound::{MoveSound, PendingSound};
 
 #[allow(clippy::too_many_arguments)]
 pub fn handle_click(
+    mut commands: Commands,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform)>,
@@ -19,8 +24,37 @@ pub fn handle_click(
     mut dirty: ResMut<RenderDirty>,
     orient: Res<BoardOrientation>,
     net: Option<Res<NetLink>>,
+    animation: Res<AnimationPlaying>,
+    mut pending_sound: ResMut<PendingSound>,
+    mut history_view: ResMut<HistoryView>,
+    drag: Res<DragState>,
 ) {
+    // Block clicks during an active drag.
+    if drag.is_dragging() {
+        return;
+    }
+
+    // Right-click: clear selection, or return to live view from history.
+    if buttons.just_pressed(MouseButton::Right) {
+        if history_view.is_viewing() {
+            history_view.return_to_live();
+            dirty.0 = true;
+        } else if selection.from.is_some() {
+            selection.from = None;
+            dirty.0 = true;
+        }
+        return;
+    }
+
     if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+    // Block input during animation.
+    if animation.0 {
+        return;
+    }
+    // Block input during history review mode.
+    if history_view.is_viewing() {
         return;
     }
     // Block board interaction until a networked game is actually connected,
@@ -73,19 +107,44 @@ pub fn handle_click(
                     return;
                 }
             }
+            // Detect capture BEFORE making the move.
+            let is_capture = core.game.board().piece_at(clicked).is_some();
+
             let mv = Move::new(from, clicked);
             if core.game.make_move(mv).is_ok() {
+                // Detect check AFTER the move.
+                let is_check = core.game.board().is_in_check(core.game.side_to_move());
+
                 selection.from = None;
                 core.last_move = Some((mv.from, mv.to));
+                crate::moves::MOVE_APPLIED_THIS_FRAME
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 dirty.0 = true;
-                // Forward to peer in any networked mode (LAN or relay).
+
+                // Auto-return to live view if in history review.
+                history_view.return_to_live();
+
+                // Queue sound effect with piece kind for pitch variation.
+                let moved_piece = core.game.board().piece_at(mv.to).map(|p| p.kind);
+                pending_sound.sound = Some(if is_check {
+                    MoveSound::Check
+                } else if is_capture {
+                    MoveSound::Capture
+                } else {
+                    MoveSound::Normal
+                });
+                pending_sound.piece = moved_piece;
+
+                // Forward to peer in any networked mode.
                 if core.mode.is_networked() {
                     if let Some(net) = net {
                         let _ = net.out.send(NetCommand::Move(mv));
                     }
                 }
             } else {
-                // Illegal target: keep selection so the user can retry.
+                // Invalid move: visual + audio feedback.
+                spawn_invalid_flash(&mut commands, clicked, *orient);
+                pending_sound.sound = Some(MoveSound::Invalid);
             }
         }
     }

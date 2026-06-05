@@ -9,14 +9,28 @@
 use bevy::prelude::*;
 use chess_core::Color as ChessColor;
 
+use crate::animation::{AnimSpeedSetting, AnimateSlide, AnimationPlaying, PendingCapture};
 use crate::app_state::{
     square_to_world, BoardOrientation, CoreGame, Selection, UiFonts, CELL, PIECE_RADIUS,
 };
+use crate::board_theme::BoardTheme;
+use crate::drag::Dragging;
+use crate::history_view::HistoryView;
 
 /// Set to `true` by any system that mutates the game; the render system redraws
 /// pieces and clears the flag.
 #[derive(Resource, Default)]
 pub struct RenderDirty(pub bool);
+
+/// Whether board coordinate labels are visible (toggled with C key).
+#[derive(Resource)]
+pub struct ShowCoordinates(pub bool);
+
+impl Default for ShowCoordinates {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 
 #[derive(Component)]
 pub struct BoardLine;
@@ -24,25 +38,51 @@ pub struct BoardLine;
 #[derive(Component)]
 pub struct PieceMarker;
 
+/// Identifies a persistent piece entity by its board square and piece type.
+/// Used for diff-based rendering — pieces are only respawned when the board
+/// state actually changes for that square.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PieceSquare {
+    pub sq: chess_core::Square,
+    pub piece: chess_core::Piece,
+}
+
 #[derive(Component)]
 pub struct HighlightMarker;
 
-// --- 国风 (national-style) wood palette -----------------------------------
-const FRAME_DARK: Color = Color::srgb(0.28, 0.16, 0.09); // outer lacquer frame
-const FRAME_EDGE: Color = Color::srgb(0.45, 0.29, 0.16); // inner gold-brown rim
-const BOARD_BG: Color = Color::srgb(0.90, 0.79, 0.57); // warm aged-paper wood
-const LINE_COLOR: Color = Color::srgb(0.30, 0.19, 0.10); // grid ink
-const RIVER_COLOR: Color = Color::srgba(0.30, 0.19, 0.10, 0.55);
+/// Pulsing red overlay on the checked king's square.
+#[derive(Component)]
+pub struct CheckHighlight;
 
-// Piece faces.
-const DISC_CREAM: Color = Color::srgb(0.97, 0.93, 0.83);
-const RED_INK: Color = Color::srgb(0.72, 0.11, 0.11);
-const BLACK_INK: Color = Color::srgb(0.12, 0.12, 0.14);
+/// Marker for the selected-piece golden quad (pulsing glow).
+#[derive(Component)]
+pub struct SelectionHighlight;
 
-fn spawn_line(commands: &mut Commands, center: Vec2, size: Vec2) {
+/// Resource controlling the initial scale-in animation when pieces first
+/// appear on the board. The animation is decorative and does not block input.
+#[derive(Resource)]
+pub struct BoardScaleIn {
+    pub timer: Timer,
+    pub active: bool,
+}
+
+impl Default for BoardScaleIn {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.3, TimerMode::Once),
+            active: false,
+        }
+    }
+}
+
+/// Marker for file-label entities (九八七…一 / 1-9) so they can be toggled.
+#[derive(Component)]
+pub struct CoordLabel;
+
+fn spawn_line(commands: &mut Commands, center: Vec2, size: Vec2, line_color: Color) {
     commands.spawn((
         Sprite {
-            color: LINE_COLOR,
+            color: line_color,
             custom_size: Some(size),
             ..default()
         },
@@ -51,35 +91,67 @@ fn spawn_line(commands: &mut Commands, center: Vec2, size: Vec2) {
     ));
 }
 
-/// A small "star point" cross mark at a board intersection.
-fn spawn_star(commands: &mut Commands, sq: chess_core::Square) {
-    // Star positions are symmetric across both sides of the river, so the
-    // orientation does not affect them; we always use Red here.
+/// Traditional L-shaped bracket marks at star-point intersections.
+///
+/// Interior points get 4 L-marks (all quadrants). Edge points on the
+/// leftmost/rightmost files get only 2 inward-facing L-marks to avoid
+/// protruding beyond the board boundary.
+fn spawn_star(
+    commands: &mut Commands,
+    sq: chess_core::Square,
+    line_color: Color,
+    is_edge_left: bool,
+    is_edge_right: bool,
+) {
     let p = square_to_world(sq, BoardOrientation::Red);
-    let bar = 10.0;
-    let thin = 2.0;
-    for (w, h) in [(bar, thin), (thin, bar)] {
+    let arm = 10.0; // length of each arm (world units)
+    let thin = 2.0; // thickness of each arm
+
+    // Quadrant offsets: (dx_sign, dy_sign) for the 4 L-marks.
+    let mut quadrants: Vec<(f32, f32)> = Vec::new();
+    if !is_edge_left {
+        quadrants.push((-1.0, -1.0));
+        quadrants.push((-1.0, 1.0));
+    }
+    if !is_edge_right {
+        quadrants.push((1.0, -1.0));
+        quadrants.push((1.0, 1.0));
+    }
+
+    let gap = 4.0; // offset from center
+    for (dx, dy) in quadrants {
+        // Horizontal arm.
         commands.spawn((
             Sprite {
-                color: LINE_COLOR,
-                custom_size: Some(Vec2::new(w, h)),
+                color: line_color,
+                custom_size: Some(Vec2::new(arm, thin)),
                 ..default()
             },
-            Transform::from_xyz(p.x, p.y, 1.2),
+            Transform::from_xyz(p.x + dx * (gap + arm * 0.5), p.y + dy * gap, 1.2),
+            BoardLine,
+        ));
+        // Vertical arm.
+        commands.spawn((
+            Sprite {
+                color: line_color,
+                custom_size: Some(Vec2::new(thin, arm)),
+                ..default()
+            },
+            Transform::from_xyz(p.x + dx * gap, p.y + dy * (gap + arm * 0.5), 1.2),
             BoardLine,
         ));
     }
 }
 
 /// Spawn the board background, lacquer frame, grid, river text, and star marks.
-pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
+pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>, theme: Res<BoardTheme>) {
     let w = 8.0 * CELL;
     let h = 9.0 * CELL;
 
     // Outer lacquer frame (largest, darkest).
     commands.spawn((
         Sprite {
-            color: FRAME_DARK,
+            color: theme.palette.frame_dark,
             custom_size: Some(Vec2::new(w + CELL * 2.6, h + CELL * 2.6)),
             ..default()
         },
@@ -89,7 +161,7 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
     // Gold-brown rim.
     commands.spawn((
         Sprite {
-            color: FRAME_EDGE,
+            color: theme.palette.frame_edge,
             custom_size: Some(Vec2::new(w + CELL * 1.5, h + CELL * 1.5)),
             ..default()
         },
@@ -99,7 +171,7 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
     // Wood play field.
     commands.spawn((
         Sprite {
-            color: BOARD_BG,
+            color: theme.palette.board_bg,
             custom_size: Some(Vec2::new(w + CELL, h + CELL)),
             ..default()
         },
@@ -107,29 +179,83 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
         BoardLine,
     ));
 
+    // Inner edge shadows — subtle dark overlays for depth.
+    let shadow_width = CELL * 0.12;
+    let shadow_color = Color::srgba(0.0, 0.0, 0.0, 0.12);
+    // Top shadow
+    commands.spawn((
+        Sprite {
+            color: shadow_color,
+            custom_size: Some(Vec2::new(w + CELL, shadow_width)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, h * 0.5 + CELL * 0.5 - shadow_width * 0.5, 0.3),
+        BoardLine,
+    ));
+    // Bottom shadow
+    commands.spawn((
+        Sprite {
+            color: shadow_color,
+            custom_size: Some(Vec2::new(w + CELL, shadow_width)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, -h * 0.5 - CELL * 0.5 + shadow_width * 0.5, 0.3),
+        BoardLine,
+    ));
+    // Left shadow
+    commands.spawn((
+        Sprite {
+            color: shadow_color,
+            custom_size: Some(Vec2::new(shadow_width, h + CELL)),
+            ..default()
+        },
+        Transform::from_xyz(-w * 0.5 - CELL * 0.5 + shadow_width * 0.5, 0.0, 0.3),
+        BoardLine,
+    ));
+    // Right shadow
+    commands.spawn((
+        Sprite {
+            color: shadow_color,
+            custom_size: Some(Vec2::new(shadow_width, h + CELL)),
+            ..default()
+        },
+        Transform::from_xyz(w * 0.5 + CELL * 0.5 - shadow_width * 0.5, 0.0, 0.3),
+        BoardLine,
+    ));
+
     let thick = 2.0;
-    // 10 horizontal lines.
     for r in 0..10 {
         let y = (r as f32 - 4.5) * CELL;
-        spawn_line(&mut commands, Vec2::new(0.0, y), Vec2::new(w, thick));
+        spawn_line(
+            &mut commands,
+            Vec2::new(0.0, y),
+            Vec2::new(w, thick),
+            theme.palette.line_color,
+        );
     }
-    // Vertical lines: outer files full height; inner files split at the river.
     for f in 0..9 {
         let x = (f as f32 - 4.0) * CELL;
         if f == 0 || f == 8 {
-            spawn_line(&mut commands, Vec2::new(x, 0.0), Vec2::new(thick, h));
+            spawn_line(
+                &mut commands,
+                Vec2::new(x, 0.0),
+                Vec2::new(thick, h),
+                theme.palette.line_color,
+            );
         } else {
             let bottom_center = ((0.0 + 4.0) / 2.0 - 4.5) * CELL;
             spawn_line(
                 &mut commands,
                 Vec2::new(x, bottom_center),
                 Vec2::new(thick, 4.0 * CELL),
+                theme.palette.line_color,
             );
             let top_center = ((5.0 + 9.0) / 2.0 - 4.5) * CELL;
             spawn_line(
                 &mut commands,
                 Vec2::new(x, top_center),
                 Vec2::new(thick, 4.0 * CELL),
+                theme.palette.line_color,
             );
         }
     }
@@ -151,7 +277,7 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
             let angle = delta.y.atan2(delta.x);
             commands.spawn((
                 Sprite {
-                    color: LINE_COLOR,
+                    color: theme.palette.line_color,
                     custom_size: Some(Vec2::new(len, thick)),
                     ..default()
                 },
@@ -183,29 +309,130 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>) {
         (8, 6),
     ] {
         if let Some(sq) = chess_core::Square::new(f, r) {
-            spawn_star(&mut commands, sq);
+            spawn_star(&mut commands, sq, theme.palette.line_color, f == 0, f == 8);
         }
     }
 
+    // Corner ornaments — small L-shaped marks at the board corners.
+    let corner_len = CELL * 0.4;
+    let corner_thick = 3.0;
+    let corner_offset = 0.5 * CELL; // offset from the board edge
+    let bx = 4.0 * CELL + corner_offset;
+    let by = 4.5 * CELL + corner_offset;
+    let corner_color = theme.palette.line_color;
+
+    for &(sx, sy) in &[(1.0f32, 1.0f32), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        let cx = sx * bx;
+        let cy = sy * by;
+        // Horizontal bar.
+        commands.spawn((
+            Sprite {
+                color: corner_color,
+                custom_size: Some(Vec2::new(corner_len, corner_thick)),
+                ..default()
+            },
+            Transform::from_xyz(cx - sx * corner_len * 0.5, cy, 1.5),
+            BoardLine,
+        ));
+        // Vertical bar.
+        commands.spawn((
+            Sprite {
+                color: corner_color,
+                custom_size: Some(Vec2::new(corner_thick, corner_len)),
+                ..default()
+            },
+            Transform::from_xyz(cx, cy - sy * corner_len * 0.5, 1.5),
+            BoardLine,
+        ));
+    }
+
     // River calligraphy: 楚河 (left) · 漢界 (right).
-    let river_y = -0.5 * CELL + 4.0 * CELL - 4.0 * CELL; // == middle row (y=0)
+    let river_y = -0.5 * CELL + 4.0 * CELL - 4.0 * CELL;
     let _ = river_y;
-    for (text, x) in [("楚  河", -2.0 * CELL), ("漢  界", 2.0 * CELL)] {
+    let river_srgba = theme.palette.river_color.to_srgba();
+    let river_text_color = Color::srgba(river_srgba.red, river_srgba.green, river_srgba.blue, 0.4);
+    for (text, x) in [("楚　　河", -2.0 * CELL), ("漢　　界", 2.0 * CELL)] {
         commands.spawn((
             Text2d::new(text),
             TextFont {
                 font: fonts.bold.clone(),
-                font_size: 40.0,
+                font_size: 48.0,
                 ..default()
             },
-            TextColor(RIVER_COLOR),
+            TextColor(river_text_color),
             Transform::from_xyz(x, 0.0, 0.5),
             BoardLine,
+        ));
+    }
+
+    // Decorative horizontal separator line between the river texts.
+    commands.spawn((
+        Sprite {
+            color: river_text_color,
+            custom_size: Some(Vec2::new(CELL * 3.0, 1.5)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, 0.4),
+        BoardLine,
+    ));
+
+    // File labels along bottom and top edges.
+    let red_files = ['九', '八', '七', '六', '五', '四', '三', '二', '一'];
+    let black_files = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    let label_offset = CELL * 0.6;
+
+    for f in 0..9u8 {
+        let x = (f as f32 - 4.0) * CELL;
+        commands.spawn((
+            Text2d::new(red_files[f as usize].to_string()),
+            TextFont {
+                font: fonts.regular.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(theme.palette.river_color),
+            Transform::from_xyz(x, -4.5 * CELL - label_offset, 0.5),
+            BoardLine,
+            CoordLabel,
+        ));
+        commands.spawn((
+            Text2d::new(black_files[f as usize].to_string()),
+            TextFont {
+                font: fonts.regular.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(theme.palette.river_color),
+            Transform::from_xyz(x, 4.5 * CELL + label_offset, 0.5),
+            BoardLine,
+            CoordLabel,
+        ));
+    }
+
+    // Rank labels along the left edge (0-9).
+    let rank_labels = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    for r in 0..10u8 {
+        let y = (r as f32 - 4.5) * CELL;
+        commands.spawn((
+            Text2d::new(rank_labels[r as usize].to_string()),
+            TextFont {
+                font: fonts.regular.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(theme.palette.river_color),
+            Transform::from_xyz(-4.0 * CELL - label_offset, y, 0.5),
+            BoardLine,
+            CoordLabel,
         ));
     }
 }
 
 /// Redraw all pieces + highlights when [`RenderDirty`] is set.
+///
+/// Defers the redraw while an animation is playing so that mid-animation
+/// `RenderDirty` triggers (e.g. theme change) don't clobber in-flight
+/// [`AnimateSlide`] / [`PendingCapture`] entities.
 #[allow(clippy::too_many_arguments)]
 pub fn redraw_pieces(
     mut dirty: ResMut<RenderDirty>,
@@ -214,22 +441,241 @@ pub fn redraw_pieces(
     selection: Res<Selection>,
     fonts: Res<UiFonts>,
     orient: Res<BoardOrientation>,
-    existing: Query<Entity, Or<(With<PieceMarker>, With<HighlightMarker>)>>,
+    theme: Res<BoardTheme>,
+    anim_playing: Res<AnimationPlaying>,
+    anim_speed: Res<AnimSpeedSetting>,
+    history_view: Res<HistoryView>,
+    highlight_q: Query<Entity, With<HighlightMarker>>,
+    mut piece_q: Query<
+        (Entity, &mut PieceSquare, &mut Transform),
+        (
+            With<PieceMarker>,
+            Without<PendingCapture>,
+            Without<Dragging>,
+        ),
+    >,
+    capture_q: Query<Entity, With<PendingCapture>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    board_scale_in: Res<BoardScaleIn>,
 ) {
     let orient = *orient;
     if !dirty.0 {
         return;
     }
+
+    // Defer the dirty redraw while animation is in-flight. The flag stays
+    // set so the next frame after animation finishes will process it.
+    if anim_playing.0 {
+        return;
+    }
+
     dirty.0 = false;
 
-    for e in &existing {
+    // Always rebuild highlights (cheap, transient).
+    for e in &highlight_q {
         commands.entity(e).despawn();
     }
 
+    // Defensive cleanup: despawn stale PendingCapture entities that survived
+    // past the animation window (should not happen, but avoids ghost pieces).
+    for e in &capture_q {
+        commands.entity(e).despawn();
+    }
+
+    // --- Diff-based piece rendering with animation awareness ---
+    // In history view, render the historical position.
+    let viewing = history_view.viewing_ply;
+    let display_board;
+    let board_ref = if let Some(ply) = viewing {
+        display_board = core
+            .game
+            .board_at_ply(ply)
+            .unwrap_or_else(|| core.game.board().clone());
+        &display_board
+    } else {
+        core.game.board()
+    };
+    let board_pieces: Vec<(chess_core::Square, chess_core::Piece)> = board_ref.pieces().collect();
+
+    let existing_pieces: Vec<(Entity, PieceSquare)> =
+        piece_q.iter().map(|(e, ps, _)| (e, *ps)).collect();
+
+    let mut kept: Vec<bool> = vec![false; existing_pieces.len()];
+    let mut board_covered: Vec<bool> = vec![false; board_pieces.len()];
+
+    // Pass 1: exact match (same square, same piece type).
+    for (i, (_, ps)) in existing_pieces.iter().enumerate() {
+        for (j, (sq, piece)) in board_pieces.iter().enumerate() {
+            if !board_covered[j] && ps.sq == *sq && ps.piece == *piece {
+                kept[i] = true;
+                board_covered[j] = true;
+                break;
+            }
+        }
+    }
+
+    // Skip animation detection in history view mode.
+    // Pass 2: detect a "moved" piece via last_move and animate it.
+    // A piece entity at from_sq whose type matches the piece now at to_sq
+    // is the mover — slide it rather than despawn+respawn.
+    let mut animated_entity: Option<Entity> = None;
+    let suppress_animation = viewing.is_some();
+    if !suppress_animation {
+        if let Some((from_sq, to_sq)) = core.last_move {
+            // Find the uncovered board entry at to_sq.
+            let to_idx = board_pieces
+                .iter()
+                .enumerate()
+                .find(|(j, (sq, _))| *sq == to_sq && !board_covered[*j]);
+
+            if let Some((j_to, (_, piece_at_to))) = to_idx {
+                // Find the existing entity at from_sq with the same piece type.
+                let from_entity_idx = existing_pieces
+                    .iter()
+                    .enumerate()
+                    .find(|(i, (_, ps))| !kept[*i] && ps.sq == from_sq && ps.piece == *piece_at_to);
+
+                if let Some((i_from, (entity, _))) = from_entity_idx {
+                    // Mark this entity as the animated mover.
+                    kept[i_from] = true;
+                    board_covered[j_to] = true;
+                    animated_entity = Some(*entity);
+
+                    let from_pos = square_to_world(from_sq, orient);
+                    let to_pos = square_to_world(to_sq, orient);
+                    let dur = anim_speed.0.duration();
+                    commands
+                        .entity(*entity)
+                        .insert(AnimateSlide::with_duration(from_pos, to_pos, dur));
+
+                    // Check for a captured enemy piece entity at to_sq.
+                    let captured_idx = existing_pieces.iter().enumerate().find(|(ci, (_, ps))| {
+                        !kept[*ci] && ps.sq == to_sq && ps.piece.color != piece_at_to.color
+                    });
+                    if let Some((ci, (cap_entity, _))) = captured_idx {
+                        kept[ci] = true; // shield from despawn — animate_pieces handles it
+                        commands
+                            .entity(*cap_entity)
+                            .insert(PendingCapture::with_duration(anim_speed.0.duration()));
+                    }
+                }
+            }
+        }
+    }
+    // Remove unmatched entities (no longer on the board).
+    for (i, (entity, _)) in existing_pieces.iter().enumerate() {
+        if !kept[i] {
+            commands.entity(*entity).despawn();
+        }
+    }
+
+    // Update PieceSquare and transform of kept entities.
+    for (entity, mut ps, mut transform) in &mut piece_q {
+        if Some(entity) == animated_entity {
+            // Update PieceSquare to the destination square.
+            if let Some((_, to_sq)) = core.last_move {
+                ps.sq = to_sq;
+            }
+            // Place at FROM position — AnimateSlide will lerp to TO.
+            if let Some((from_sq, _)) = core.last_move {
+                let from_pos = square_to_world(from_sq, orient);
+                transform.translation.x = from_pos.x;
+                transform.translation.y = from_pos.y;
+            }
+        } else {
+            let pos = square_to_world(ps.sq, orient);
+            transform.translation.x = pos.x;
+            transform.translation.y = pos.y;
+        }
+    }
+
+    // Spawn new pieces for uncovered board positions.
+    let disc = meshes.add(Circle::new(PIECE_RADIUS));
+    let cream_mat = materials.add(theme.palette.disc_face);
+    let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.28));
+    let border_disc = meshes.add(Circle::new(PIECE_RADIUS + 0.5));
+    let border_mat = materials.add(theme.palette.disc_border);
+
+    for (j, (sq, piece)) in board_pieces.iter().enumerate() {
+        if board_covered[j] {
+            continue;
+        }
+        let pos = square_to_world(*sq, orient);
+        let ink = match piece.color {
+            ChessColor::Red => theme.palette.red_ink,
+            ChessColor::Black => theme.palette.black_ink,
+        };
+        let ink_mat = materials.add(ink);
+
+        commands
+            .spawn((
+                Mesh2d(disc.clone()),
+                MeshMaterial2d(cream_mat.clone()),
+                Transform {
+                    translation: Vec3::new(pos.x, pos.y, 10.0),
+                    scale: if board_scale_in.active {
+                        Vec3::splat(0.0)
+                    } else {
+                        Vec3::ONE
+                    },
+                    ..default()
+                },
+                PieceMarker,
+                PieceSquare {
+                    sq: *sq,
+                    piece: *piece,
+                },
+            ))
+            .with_children(|parent| {
+                // Subtle dark border ring for better definition on light themes.
+                parent.spawn((
+                    Mesh2d(border_disc.clone()),
+                    MeshMaterial2d(border_mat.clone()),
+                    Transform::from_xyz(0.0, 0.0, -0.1),
+                ));
+                parent.spawn((
+                    Mesh2d(disc.clone()),
+                    MeshMaterial2d(shadow_mat.clone()),
+                    Transform::from_xyz(2.0, -3.0, -0.5),
+                ));
+                parent.spawn((
+                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 1.5))),
+                    MeshMaterial2d(ink_mat.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.1),
+                ));
+                parent.spawn((
+                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 4.5))),
+                    MeshMaterial2d(cream_mat.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.2),
+                ));
+                parent.spawn((
+                    Text2d::new(piece.glyph().to_string()),
+                    TextFont {
+                        font: fonts.bold.clone(),
+                        font_size: 34.0,
+                        ..default()
+                    },
+                    TextColor(ink),
+                    Transform::from_xyz(0.0, 0.0, 0.3),
+                ));
+            });
+    }
+
     // Last-move highlight: jade-green rings around the from/to squares.
-    if let Some((lm_from, lm_to)) = core.last_move {
+    // In history view, highlight the move at the viewed ply.
+    let highlight_move = if let Some(ply) = viewing {
+        if ply > 0 {
+            let entry = &core.game.history()[ply - 1];
+            let mv = entry.mv();
+            Some((mv.from, mv.to))
+        } else {
+            None
+        }
+    } else {
+        core.last_move
+    };
+    if let Some((lm_from, lm_to)) = highlight_move {
         let ring_inner = PIECE_RADIUS + 1.0;
         let ring_outer = PIECE_RADIUS + 5.0;
         let ring_mesh = meshes.add(Annulus::new(ring_inner, ring_outer));
@@ -243,103 +689,184 @@ pub fn redraw_pieces(
                 HighlightMarker,
             ));
         }
-    }
 
-    // Selection highlight + legal destination dots.
-    if let Some(from) = selection.from {
-        let pos = square_to_world(from, orient);
-        commands.spawn((
-            Sprite {
-                color: Color::srgba(0.95, 0.78, 0.30, 0.35),
-                custom_size: Some(Vec2::splat(CELL * 0.92)),
-                ..default()
-            },
-            Transform::from_xyz(pos.x, pos.y, 5.0),
-            HighlightMarker,
-        ));
-        for mv in core
-            .game
-            .legal_moves()
-            .into_iter()
-            .filter(|m| m.from == from)
-        {
-            let p = square_to_world(mv.to, orient);
+        // Amber highlight squares behind last-move source and destination.
+        for sq in [lm_from, lm_to] {
+            let pos = square_to_world(sq, orient);
             commands.spawn((
-                Mesh2d(meshes.add(Circle::new(7.0))),
-                MeshMaterial2d(materials.add(Color::srgba(0.15, 0.55, 0.25, 0.85))),
-                Transform::from_xyz(p.x, p.y, 6.0),
+                Sprite {
+                    color: Color::srgba(0.90, 0.78, 0.30, 0.18),
+                    custom_size: Some(Vec2::splat(CELL * 0.95)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, 2.0),
                 HighlightMarker,
             ));
         }
     }
 
-    let disc = meshes.add(Circle::new(PIECE_RADIUS));
-    let cream_mat = materials.add(DISC_CREAM);
-    let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.28));
+    // Selection highlight + legal destination dots (not shown in history view).
+    if viewing.is_none() {
+        if let Some(from) = selection.from {
+            let pos = square_to_world(from, orient);
+            commands.spawn((
+                Sprite {
+                    color: Color::srgba(0.95, 0.78, 0.30, 0.35),
+                    custom_size: Some(Vec2::splat(CELL * 0.92)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, 5.0),
+                HighlightMarker,
+                SelectionHighlight,
+            ));
+            for mv in core
+                .game
+                .legal_moves()
+                .into_iter()
+                .filter(|m| m.from == from)
+            {
+                let p = square_to_world(mv.to, orient);
+                let is_capture = board_ref.piece_at(mv.to).is_some();
+                if is_capture {
+                    // Red-tinted ring around enemy piece to indicate capture.
+                    let ring_inner = PIECE_RADIUS + 1.0;
+                    let ring_outer = PIECE_RADIUS + 5.0;
+                    commands.spawn((
+                        Mesh2d(meshes.add(Annulus::new(ring_inner, ring_outer))),
+                        MeshMaterial2d(materials.add(Color::srgba(0.85, 0.20, 0.12, 0.70))),
+                        Transform::from_xyz(p.x, p.y, 6.0),
+                        HighlightMarker,
+                    ));
+                } else {
+                    // Small green dot for empty square moves.
+                    commands.spawn((
+                        Mesh2d(meshes.add(Circle::new(7.0))),
+                        MeshMaterial2d(materials.add(Color::srgba(0.15, 0.55, 0.25, 0.85))),
+                        Transform::from_xyz(p.x, p.y, 6.0),
+                        HighlightMarker,
+                    ));
+                }
+            }
+        }
+    }
 
-    for (sq, piece) in core.game.board().pieces() {
-        let pos = square_to_world(sq, orient);
-        let ink = match piece.color {
-            ChessColor::Red => RED_INK,
-            ChessColor::Black => BLACK_INK,
+    // Side-to-move indicator: small colored diamond on the board edge.
+    if viewing.is_none() && !core.game.is_over() {
+        let stm = core.game.side_to_move();
+        let (indicator_y, indicator_color) = match stm {
+            ChessColor::Red => (-4.0 * CELL, Color::srgba(0.9, 0.2, 0.1, 0.7)),
+            ChessColor::Black => (4.0 * CELL, Color::srgba(0.15, 0.15, 0.15, 0.7)),
         };
-        let ink_mat = materials.add(ink);
-
-        // Soft drop shadow.
         commands.spawn((
-            Mesh2d(disc.clone()),
-            MeshMaterial2d(shadow_mat.clone()),
-            Transform::from_xyz(pos.x + 2.0, pos.y - 3.0, 9.5),
-            PieceMarker,
+            Sprite {
+                color: indicator_color,
+                custom_size: Some(Vec2::splat(10.0)),
+                ..default()
+            },
+            Transform {
+                translation: Vec3::new(4.0 * CELL + CELL * 0.8, indicator_y, 3.0),
+                rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_4),
+                ..default()
+            },
+            HighlightMarker,
         ));
+    }
 
-        commands
-            .spawn((
-                // Cream wooden disc face.
-                Mesh2d(disc.clone()),
-                MeshMaterial2d(cream_mat.clone()),
-                Transform::from_xyz(pos.x, pos.y, 10.0),
-                PieceMarker,
-            ))
-            .with_children(|parent| {
-                // Colored outer ring.
-                parent.spawn((
-                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 1.5))),
-                    MeshMaterial2d(ink_mat.clone()),
-                    Transform::from_xyz(0.0, 0.0, 0.1),
-                ));
-                // Inner cream face inside the ring.
-                parent.spawn((
-                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 4.5))),
-                    MeshMaterial2d(cream_mat.clone()),
-                    Transform::from_xyz(0.0, 0.0, 0.2),
-                ));
-                // Engraved glyph.
-                parent.spawn((
-                    Text2d::new(piece.glyph().to_string()),
-                    TextFont {
-                        font: fonts.bold.clone(),
-                        font_size: 34.0,
-                        ..default()
-                    },
-                    TextColor(ink),
-                    Transform::from_xyz(0.0, 0.0, 0.3),
-                ));
-            });
+    // Check warning: red pulse on the checked king's square.
+    if viewing.is_none() && !core.game.is_over() {
+        let stm = core.game.side_to_move();
+        if core.game.board().is_in_check(stm) {
+            // Find the king of the side in check.
+            for (sq, piece) in core.game.board().pieces() {
+                if piece.color == stm && piece.kind == chess_core::PieceKind::King {
+                    let pos = square_to_world(sq, orient);
+                    commands.spawn((
+                        Sprite {
+                            color: Color::srgba(1.0, 0.15, 0.1, 0.35),
+                            custom_size: Some(Vec2::splat(CELL * 0.92)),
+                            ..default()
+                        },
+                        Transform::from_xyz(pos.x, pos.y, 11.5),
+                        HighlightMarker,
+                        CheckHighlight,
+                    ));
+                    break;
+                }
+            }
+        }
     }
 }
 
 /// Mark dirty once when entering the game so the first frame draws pieces.
-pub fn mark_dirty_on_enter(mut dirty: ResMut<RenderDirty>) {
+pub fn mark_dirty_on_enter(mut dirty: ResMut<RenderDirty>, mut scale_in: ResMut<BoardScaleIn>) {
     dirty.0 = true;
+    scale_in.active = true;
+    scale_in.timer.reset();
 }
 
 /// Tear down board entities when leaving the game.
 pub fn teardown_board(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<BoardLine>, With<PieceMarker>, With<HighlightMarker>)>>,
+    q: Query<
+        Entity,
+        Or<(
+            With<BoardLine>,
+            With<PieceMarker>,
+            With<HighlightMarker>,
+            With<CoordLabel>,
+        )>,
+    >,
 ) {
     for e in &q {
         commands.entity(e).despawn();
+    }
+}
+
+/// Pulse the selection highlight alpha for a gentle glow effect.
+pub fn animate_selection_glow(
+    time: Res<Time>,
+    mut query: Query<&mut Sprite, With<SelectionHighlight>>,
+) {
+    let t = time.elapsed_secs();
+    let alpha = 0.2 + 0.15 * (t * 3.0 * std::f32::consts::TAU).sin();
+    for mut sprite in &mut query {
+        sprite.color = Color::srgba(0.95, 0.78, 0.30, alpha);
+    }
+}
+
+/// Animate the check warning overlay with a pulsing alpha.
+pub fn animate_check_pulse(time: Res<Time>, mut query: Query<&mut Sprite, With<CheckHighlight>>) {
+    let t = time.elapsed_secs();
+    let alpha = 0.2 + 0.3 * (t * 6.0).sin().abs();
+    for mut sprite in &mut query {
+        sprite.color = Color::srgba(1.0, 0.15, 0.1, alpha);
+    }
+}
+
+/// Animate pieces scaling in when the board first appears.
+pub fn animate_board_scale_in(
+    time: Res<Time>,
+    mut scale_in: ResMut<BoardScaleIn>,
+    mut pieces: Query<&mut Transform, With<PieceMarker>>,
+) {
+    if !scale_in.active {
+        return;
+    }
+
+    scale_in.timer.tick(time.delta());
+    let t = scale_in.timer.fraction();
+    // Ease-out back: same overshoot easing as piece slide animations.
+    let scale = crate::animation::ease_out_back(t);
+
+    for mut tf in &mut pieces {
+        tf.scale = Vec3::splat(scale);
+    }
+
+    if scale_in.timer.is_finished() {
+        scale_in.active = false;
+        // Ensure all pieces are exactly at scale 1.0.
+        for mut tf in &mut pieces {
+            tf.scale = Vec3::ONE;
+        }
     }
 }
