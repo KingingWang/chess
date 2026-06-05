@@ -14,8 +14,10 @@
 //! [`Ai::best_move`] runs the built-in search via `spawn_blocking` and the UCI
 //! engine via async IO, so callers (e.g. a Bevy task pool) never block.
 
+pub mod book;
 pub mod eval;
 pub mod search;
+pub mod tt;
 pub mod uci;
 
 use std::time::Duration;
@@ -27,7 +29,7 @@ pub use uci::{UciConfig, UciEngine, UciError};
 
 /// Difficulty presets mapping to think time and (for the built-in engine) a
 /// depth cap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Difficulty {
     Easy,
     Medium,
@@ -56,6 +58,25 @@ impl Difficulty {
             },
         }
     }
+
+    /// Human-readable Chinese label for display in the status bar.
+    pub fn label(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "简单",
+            Difficulty::Medium => "中等",
+            Difficulty::Hard => "困难",
+            Difficulty::Master => "大师",
+        }
+    }
+    /// Emoji icon for this difficulty.
+    pub fn emoji(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "🟢",
+            Difficulty::Medium => "🟡",
+            Difficulty::Hard => "🔴",
+            Difficulty::Master => "👑",
+        }
+    }
 }
 
 /// Unified opponent. Prefer [`Ai::pikafish`]; it transparently falls back to
@@ -63,6 +84,13 @@ impl Difficulty {
 pub enum Ai {
     Builtin,
     Uci(Box<UciEngine>),
+}
+
+/// Global opening book (lazy-initialized).
+static BOOK: std::sync::OnceLock<book::OpeningBook> = std::sync::OnceLock::new();
+
+fn get_book() -> &'static book::OpeningBook {
+    BOOK.get_or_init(book::OpeningBook::default_book)
 }
 
 impl Ai {
@@ -94,9 +122,17 @@ impl Ai {
         board: &Board,
         history: &[Move],
         limits: SearchLimits,
+        use_book: bool,
     ) -> Option<Move> {
         match self {
             Ai::Builtin => {
+                // Try opening book first (skip for Easy difficulty).
+                if use_book {
+                    if let Some(book_mv) = get_book().lookup(board) {
+                        tracing::info!(mv = %book_mv.to_iccs(), "book move");
+                        return Some(book_mv);
+                    }
+                }
                 let board = board.clone();
                 // Keep the CPU-bound search off the async/render thread.
                 tokio::task::spawn_blocking(move || search::search(&board, limits).best_move)
@@ -191,6 +227,7 @@ mod tests {
                     movetime: Duration::from_millis(300),
                     max_depth: 4,
                 },
+                true,
             )
             .await;
         assert!(mv.is_some());
