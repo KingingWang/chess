@@ -184,7 +184,7 @@ pub fn keyboard_shortcuts(
         crate::toast::spawn_toast(
             &mut commands,
             &fonts,
-            &format!("🔄 视角: {}{}{}", orient_label, round_hint, turn_hint),
+            &format!("「换」 视角: {}{}{}", orient_label, round_hint, turn_hint),
         );
     }
 
@@ -214,9 +214,12 @@ pub fn keyboard_shortcuts(
             String::new()
         };
         let msg = if saved {
-            format!("✓ 已保存 · 🔄 新局 · {}{}", mode_label, abandon_hint)
+            format!(
+                "「✓」 已保存 · 「换」 新局 · {}{}",
+                mode_label, abandon_hint
+            )
         } else {
-            format!("🔄 新局 · {}{}", mode_label, abandon_hint)
+            format!("「换」 新局 · {}{}", mode_label, abandon_hint)
         };
         crate::toast::spawn_toast(&mut commands, &fonts, &msg);
     }
@@ -252,9 +255,9 @@ pub fn keyboard_shortcuts(
         }
         let coord_count = coord_q.iter().count();
         let label = if show_coords.0 {
-            format!("📐 坐标: 显示 ({}个)", coord_count)
+            format!("「标」 坐标: 显示 ({}个)", coord_count)
         } else {
-            "📐 坐标: 隐藏".to_string()
+            "「标」 坐标: 隐藏".to_string()
         };
         crate::toast::spawn_toast(&mut commands, &fonts, &label);
         crate::settings::save_settings(&crate::settings::collect_settings(
@@ -548,11 +551,11 @@ pub fn toggle_fullscreen(
                     window.mode = bevy::window::WindowMode::BorderlessFullscreen(
                         bevy::window::MonitorSelection::Current,
                     );
-                    crate::toast::spawn_toast(&mut commands, &fonts, "🖥 全屏模式");
+                    crate::toast::spawn_toast(&mut commands, &fonts, "「屏」 全屏模式");
                 }
                 _ => {
                     window.mode = bevy::window::WindowMode::Windowed;
-                    crate::toast::spawn_toast(&mut commands, &fonts, "🪟 窗口模式");
+                    crate::toast::spawn_toast(&mut commands, &fonts, "「窗」 窗口模式");
                 }
             }
         }
@@ -852,9 +855,12 @@ pub fn quick_restart(
             String::new()
         };
         let msg = if saved {
-            format!("✓ 已保存 · 🔄 新对局 · {}{}", mode_label, abandon_hint)
+            format!(
+                "「✓」 已保存 · 「换」 新对局 · {}{}",
+                mode_label, abandon_hint
+            )
         } else {
-            format!("🔄 新对局 · {}{}", mode_label, abandon_hint)
+            format!("「换」 新对局 · {}{}", mode_label, abandon_hint)
         };
         crate::toast::spawn_toast(&mut commands, &fonts, &msg);
     }
@@ -970,7 +976,7 @@ pub fn reset_settings(
         }
         if deleted > 0 {
             let kb = total_bytes as f32 / 1024.0;
-            let msg = format!("🗑 已清除{}个存档 ({:.1}KB)", deleted, kb);
+            let msg = format!("「删」 已清除{}个存档 ({:.1}KB)", deleted, kb);
             crate::toast::spawn_toast(&mut commands, &fonts, &msg);
         } else {
             crate::toast::spawn_toast(&mut commands, &fonts, "无存档可清除 · Ctrl+S 保存棋局");
@@ -1005,9 +1011,9 @@ pub fn reset_settings(
         && old_anim == crate::animation::AnimSpeed::default()
         && old_coords;
     if already_default {
-        crate::toast::spawn_toast(&mut commands, &fonts, "⚙ 已是默认设置");
+        crate::toast::spawn_toast(&mut commands, &fonts, "「设」 已是默认设置");
     } else {
-        let msg = format!("🔄 设置已重置 (从{})", old_theme);
+        let msg = format!("「换」 设置已重置 (从{})", old_theme);
         crate::toast::spawn_toast(&mut commands, &fonts, &msg);
     }
 }

@@ -73,11 +73,11 @@ impl ThemeId {
     /// Emoji icon for this theme.
     pub fn emoji(self) -> &'static str {
         match self {
-            ThemeId::Classic => "📜",
-            ThemeId::Dark => "🌙",
-            ThemeId::Paper => "📄",
-            ThemeId::Rosewood => "🪵",
-            ThemeId::Jade => "🟢",
+            ThemeId::Classic => "「古」",
+            ThemeId::Dark => "「暗」",
+            ThemeId::Paper => "「素」",
+            ThemeId::Rosewood => "「檀」",
+            ThemeId::Jade => "「翠」",
         }
     }
 }

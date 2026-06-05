@@ -61,11 +61,11 @@ impl VolumeLevel {
     /// Emoji icon for this volume level.
     pub fn emoji(self) -> &'static str {
         match self {
-            VolumeLevel::High => "🔊+",
-            VolumeLevel::Normal => "🔊",
-            VolumeLevel::Low => "🔉",
-            VolumeLevel::VeryLow => "🔈",
-            VolumeLevel::Mute => "🔇",
+            VolumeLevel::High => "「响+」",
+            VolumeLevel::Normal => "「响」",
+            VolumeLevel::Low => "「轻」",
+            VolumeLevel::VeryLow => "「微」",
+            VolumeLevel::Mute => "「静」",
         }
     }
 }

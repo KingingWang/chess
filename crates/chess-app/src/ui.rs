@@ -126,9 +126,9 @@ pub fn setup_menu(
                     let (emoji, text, color) = match result {
                         chess_core::GameResult::Win { winner, .. } => {
                             if *winner == chess_core::Color::Red {
-                                ("🏆", "红方胜", Color::srgb(0.85, 0.20, 0.15))
+                                ("「胜」", "红方胜", Color::srgb(0.85, 0.20, 0.15))
                             } else {
-                                ("🏆", "黑方胜", Color::srgb(0.90, 0.87, 0.80))
+                                ("「胜」", "黑方胜", Color::srgb(0.90, 0.87, 0.80))
                             }
                         }
                         chess_core::GameResult::Draw(reason) => {
@@ -137,7 +137,7 @@ pub fn setup_menu(
                                 chess_core::DrawReason::Repetition => "三次重复",
                                 chess_core::DrawReason::NoCapture => "无吃子和棋",
                             };
-                            ("🤝", desc, Color::srgb(0.80, 0.70, 0.40))
+                            ("「和」", desc, Color::srgb(0.80, 0.70, 0.40))
                         }
                     };
                     card.spawn((
@@ -158,7 +158,7 @@ pub fn setup_menu(
                 if session_stats.total() > 0 {
                     let win_pct = session_stats.wins * 100 / session_stats.total();
                     let stats_text = format!(
-                        "📊 {}胜 {}负 {}和 ({}%)",
+                        "「绩」 {}胜 {}负 {}和 ({}%)",
                         session_stats.wins, session_stats.losses, session_stats.draws, win_pct
                     );
                     card.spawn((
@@ -181,11 +181,11 @@ pub fn setup_menu(
                     let mins = total_secs / 60;
                     let secs = total_secs % 60;
                     let time_str = if mins >= 60 {
-                        format!("⏱ 本次共对弈 {}h{}分{}秒", mins / 60, mins % 60, secs)
+                        format!("「时」 本次共对弈 {}h{}分{}秒", mins / 60, mins % 60, secs)
                     } else if mins > 0 {
-                        format!("⏱ 本次共对弈 {}分{}秒", mins, secs)
+                        format!("「时」 本次共对弈 {}分{}秒", mins, secs)
                     } else {
-                        format!("⏱ 本次共对弈 {}秒", secs)
+                        format!("「时」 本次共对弈 {}秒", secs)
                     };
                     card.spawn((
                         Text::new(time_str),
@@ -262,7 +262,7 @@ pub fn setup_menu(
                     .unwrap_or(0);
                 if save_count > 0 {
                     card.spawn((
-                        Text::new(format!("📁 {}个存档 · Ctrl+O 加载", save_count)),
+                        Text::new(format!("「档」 {}个存档 · Ctrl+O 加载", save_count)),
                         TextFont {
                             font: fonts.regular.clone(),
                             font_size: 13.0,
@@ -408,13 +408,13 @@ pub fn setup_hud(
             ))
             .with_children(|panel| {
                 let mode_label = match core.mode {
-                    crate::app_state::GameMode::LocalPvp => "👥 本地对弈",
-                    crate::app_state::GameMode::VsAi => "🤖 人机对战",
+                    crate::app_state::GameMode::LocalPvp => "「友」 本地对弈",
+                    crate::app_state::GameMode::VsAi => "「机」 人机对战",
                     crate::app_state::GameMode::LanHost | crate::app_state::GameMode::LanJoin => {
-                        "🌐 局域网对弈"
+                        "「网」 局域网对弈"
                     }
                     crate::app_state::GameMode::RelayHost
-                    | crate::app_state::GameMode::RelayJoin => "🌍 互联网对弈",
+                    | crate::app_state::GameMode::RelayJoin => "「联」 互联网对弈",
                 };
                 panel.spawn((
                     Text::new(mode_label),
@@ -578,12 +578,12 @@ pub fn update_status(
 
     // Mode header.
     let mode_str = match core.mode {
-        GameMode::LocalPvp => "👥 本地双人".to_string(),
-        GameMode::VsAi => format!("🤖 人机对战 · {}", settings.difficulty.label()),
-        GameMode::LanHost | GameMode::LanJoin => "🌐 局域网对战".to_string(),
+        GameMode::LocalPvp => "「友」 本地双人".to_string(),
+        GameMode::VsAi => format!("「机」 人机对战 · {}", settings.difficulty.label()),
+        GameMode::LanHost | GameMode::LanJoin => "「网」 局域网对战".to_string(),
         GameMode::RelayHost | GameMode::RelayJoin => match &core.room_code {
-            Some(room) => format!("🌍 联网对战 · 房间 {room}"),
-            None => "🌍 联网对战".to_string(),
+            Some(room) => format!("「联」 联网对战 · 房间 {room}"),
+            None => "「联」 联网对战".to_string(),
         },
     };
     let mode_str = if *orient != crate::app_state::BoardOrientation::Red {
@@ -592,7 +592,7 @@ pub fn update_status(
         mode_str
     };
     let mode_str = if volume.level == crate::sound::VolumeLevel::Mute {
-        format!("{} 🔇", mode_str)
+        format!("{} 「静」", mode_str)
     } else {
         mode_str
     };
@@ -615,17 +615,17 @@ pub fn update_status(
             }
             GameResult::Draw(reason) => {
                 let (emoji, desc) = match reason {
-                    chess_core::DrawReason::Agreement => ("🤝", "协议和棋"),
-                    chess_core::DrawReason::Repetition => ("♻️", "三次重复"),
-                    chess_core::DrawReason::NoCapture => ("⏱️", "无吃子和棋"),
+                    chess_core::DrawReason::Agreement => ("「和」", "协议和棋"),
+                    chess_core::DrawReason::Repetition => ("♻", "三次重复"),
+                    chess_core::DrawReason::NoCapture => ("「时」", "无吃子和棋"),
                 };
                 format!("{mode_str}\n{emoji} 和棋 （{desc}）")
             }
         }
     } else {
         let side = match core.game.side_to_move() {
-            ChessColor::Red => "🔴 红方",
-            ChessColor::Black => "⚫ 黑方",
+            ChessColor::Red => "红方",
+            ChessColor::Black => "黑方",
         };
         let turn = if ai_task.rx.is_some() {
             "AI思考中…"
@@ -641,12 +641,12 @@ pub fn update_status(
             Some(clock) => {
                 let remaining = clock.remaining(core.game.side_to_move());
                 let time_str = chess_core::GameClock::format_time(remaining);
-                format!(" · 🕐{time_str}")
+                format!(" · 「时」{time_str}")
             }
             None => String::new(),
         };
         let mut s = format!(
-            "{mode_str}\n{side}行棋 · 第{move_num}手 · ⏱{elapsed}s{clock_str}\n{turn} (可走{legal_count}步)"
+            "{mode_str}\n{side}行棋 · 第{move_num}手 · 「时」{elapsed}s{clock_str}\n{turn} (可走{legal_count}步)"
         );
         // Show last move in Chinese notation.
         if core.game.history_len() > 0 {
@@ -723,7 +723,7 @@ pub fn update_status(
             s.push_str(&format!("\n▶ 自动播放中 ({:.1}s)", interval));
         }
         if undo_count.0 > 0 {
-            s.push_str(&format!("\n↩ 悔棋 {}次", undo_count.0));
+            s.push_str(&format!("\n「回」 悔棋 {}次", undo_count.0));
         }
         s
     };
@@ -771,7 +771,7 @@ pub fn hud_interaction(
                     } else {
                         String::new()
                     };
-                    let msg = format!("🔄 新对局 · {}{}", mode_label, abandon_hint);
+                    let msg = format!("「换」 新对局 · {}{}", mode_label, abandon_hint);
                     crate::toast::spawn_toast(&mut commands, &fonts, &msg);
                     if core.mode.is_net_host() {
                         if let Some(net) = &net {

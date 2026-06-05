@@ -18,7 +18,7 @@ pub struct HelpPanelVisible(pub bool);
 const HELP_TEXT: &str = "\
 快捷键一览 (共20+个快捷键)\n\
 ─────────────\n\
-Ctrl+Z / U / ⌫  悔棋\n\
+Ctrl+Z / U / Backspace  悔棋\n\
 Ctrl+N        新局\n\
 Ctrl+S        保存棋局\n\
 Ctrl+O        加载棋局\n\

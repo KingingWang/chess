@@ -107,7 +107,7 @@ pub fn check_game_over(
     let game_dur = (time.elapsed_secs() - game_start.0) as u32;
     session_play_time.0 += time.elapsed_secs() - game_start.0;
     if auto_save_game(&core, Some(&ai_settings), Some(game_dur)) {
-        let auto_msg = format!("✓ 已自动保存 (共{}手)", core.game.history_len());
+        let auto_msg = format!("「✓」 已自动保存 (共{}手)", core.game.history_len());
         crate::toast::spawn_toast(&mut commands, &fonts, &auto_msg);
     } else if core.game.history_len() > 0 {
         let fail_msg = format!("⚠ 保存失败 (共{}手未保存)", core.game.history_len());
@@ -131,10 +131,10 @@ pub fn check_game_over(
     let total_moves = core.game.history_len();
     let result_toast = match result {
         GameResult::Win { winner, .. } => match winner {
-            ChessColor::Red => format!("红方胜! 🏆 (共{}手)", total_moves),
-            ChessColor::Black => format!("黑方胜! 🏆 (共{}手)", total_moves),
+            ChessColor::Red => format!("红方胜! 「胜」 (共{}手)", total_moves),
+            ChessColor::Black => format!("黑方胜! 「胜」 (共{}手)", total_moves),
         },
-        GameResult::Draw(_) => format!("和棋 🤝 (共{}手)", total_moves),
+        GameResult::Draw(_) => format!("和棋 「和」 (共{}手)", total_moves),
     };
     crate::toast::spawn_toast(&mut commands, &fonts, &result_toast);
     let (title, subtitle, title_color) = match result {
@@ -144,11 +144,11 @@ pub fn check_game_over(
                 ChessColor::Black => "黑 方 胜",
             };
             let why = match reason {
-                WinReason::Checkmate => "♟ 将死对方",
-                WinReason::Stalemate => "🚫 困毙对方",
-                WinReason::Resignation => "🏳️ 对方认输",
-                WinReason::PerpetualCheck => "♻️ 长将判负",
-                WinReason::Timeout => "⏰ 对方超时",
+                WinReason::Checkmate => "将死对方",
+                WinReason::Stalemate => "「困」 困毙对方",
+                WinReason::Resignation => "对方认输",
+                WinReason::PerpetualCheck => "♻ 长将判负",
+                WinReason::Timeout => "对方超时",
             };
             let color = match winner {
                 ChessColor::Red => RED_COLOR,
@@ -168,7 +168,7 @@ pub fn check_game_over(
 
     // Prepend mode indicator for VsAi.
     let title = if core.mode == crate::app_state::GameMode::VsAi {
-        format!("🤖 {}", title)
+        format!("「机」 {}", title)
     } else {
         title.to_string()
     };
@@ -241,9 +241,9 @@ pub fn check_game_over(
                     if core.mode == crate::app_state::GameMode::VsAi {
                         if let GameResult::Win { winner, .. } = result {
                             let personal = if winner == core.local_color {
-                                "恭喜获胜! 🎉"
+                                "恭喜获胜! 「贺」"
                             } else {
-                                "再接再厉 · 下次加油 💪"
+                                "再接再厉 · 下次加油 "
                             };
                             card.spawn((
                                 Text::new(personal),
@@ -266,9 +266,9 @@ pub fn check_game_over(
                                     ChessColor::Red => "红方",
                                     ChessColor::Black => "黑方",
                                 };
-                                format!("{}恭喜! 🎊", side)
+                                format!("{}恭喜! 「贺」", side)
                             }
-                            GameResult::Draw(_) => "握手言和 🤝".to_string(),
+                            GameResult::Draw(_) => "握手言和 「和」".to_string(),
                         };
                         card.spawn((
                             Text::new(personal),
@@ -312,9 +312,9 @@ pub fn check_game_over(
                             Text::new({
                                 let n = rematch_count.0 + 1;
                                 if n >= 10 {
-                                    format!("🔥 第{}局!", n)
+                                    format!("「连」 第{}局!", n)
                                 } else {
-                                    format!("🎮 第{}局", n)
+                                    format!("「局」 第{}局", n)
                                 }
                             }),
                             TextFont {
@@ -452,7 +452,7 @@ pub fn check_game_over(
                     // Win streak (VsAi only).
                     if core.mode == crate::app_state::GameMode::VsAi && win_streak.0 > 1 {
                         card.spawn((
-                            Text::new(format!("🔥 连胜 {}局!", win_streak.0)),
+                            Text::new(format!("「连」 连胜 {}局!", win_streak.0)),
                             TextFont {
                                 font: fonts.bold.clone(),
                                 font_size: 18.0,
@@ -468,7 +468,7 @@ pub fn check_game_over(
                     // Undo count (if any).
                     if undo_count.0 > 0 {
                         card.spawn((
-                            Text::new(format!("↩ 悔棋 {}次", undo_count.0)),
+                            Text::new(format!("「回」 悔棋 {}次", undo_count.0)),
                             TextFont {
                                 font: fonts.regular.clone(),
                                 font_size: 14.0,
@@ -655,7 +655,7 @@ pub fn game_over_interaction(
                         dirty.0 = true;
                         if core.mode == crate::app_state::GameMode::VsAi {
                             let msg = format!(
-                                "🔄 再来一局 · {} (第{}局)",
+                                "「换」 再来一局 · {} (第{}局)",
                                 ai_settings.difficulty.label(),
                                 rematch_count.0
                             );
@@ -773,7 +773,7 @@ pub fn game_over_keyboard(
         dirty.0 = true;
         if core.mode == crate::app_state::GameMode::VsAi {
             let msg = format!(
-                "🔄 再来一局 · {} (第{}局)",
+                "「换」 再来一局 · {} (第{}局)",
                 ai_settings.difficulty.label(),
                 rematch_count.0
             );

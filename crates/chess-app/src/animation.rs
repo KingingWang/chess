@@ -47,9 +47,9 @@ impl AnimSpeed {
     /// Emoji icon for this speed.
     pub fn emoji(self) -> &'static str {
         match self {
-            AnimSpeed::Fast => "⚡",
-            AnimSpeed::Normal => "⏩",
-            AnimSpeed::Slow => "🐢",
+            AnimSpeed::Fast => "「疾」",
+            AnimSpeed::Normal => "「常」",
+            AnimSpeed::Slow => "「缓」",
         }
     }
 }

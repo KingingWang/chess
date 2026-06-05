@@ -86,7 +86,7 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             ))
             .with_children(|bg| {
                 bg.spawn((
-                    Text::new("⚫"),
+                    Text::new("▶"),
                     TextFont {
                         font: fonts.regular.clone(),
                         font_size: 16.0,
@@ -126,7 +126,7 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             ))
             .with_children(|bg| {
                 bg.spawn((
-                    Text::new("🔴"),
+                    Text::new("▶"),
                     TextFont {
                         font: fonts.regular.clone(),
                         font_size: 16.0,

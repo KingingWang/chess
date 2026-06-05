@@ -71,10 +71,10 @@ impl Difficulty {
     /// Emoji icon for this difficulty.
     pub fn emoji(self) -> &'static str {
         match self {
-            Difficulty::Easy => "🟢",
-            Difficulty::Medium => "🟡",
-            Difficulty::Hard => "🔴",
-            Difficulty::Master => "👑",
+            Difficulty::Easy => "易",
+            Difficulty::Medium => "中",
+            Difficulty::Hard => "难",
+            Difficulty::Master => "极",
         }
     }
 }

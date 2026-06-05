@@ -86,9 +86,9 @@ pub fn setup_history_panel(
                     row.spawn((
                         Text::new({
                             let (icon, mode) = match core.mode {
-                                crate::app_state::GameMode::VsAi => ("🤖", "人机"),
-                                crate::app_state::GameMode::LocalPvp => ("👥", "双人"),
-                                _ => ("🌐", "联机"),
+                                crate::app_state::GameMode::VsAi => ("「机」", "人机"),
+                                crate::app_state::GameMode::LocalPvp => ("「友」", "双人"),
+                                _ => ("「网」", "联机"),
                             };
                             format!("{} 棋 谱 · {}", icon, mode)
                         }),

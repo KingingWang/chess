@@ -278,7 +278,7 @@ pub fn update_captured_tray(
                 )
             } else {
                 (
-                    format!("⚖️ 子力平衡 (吃{}子)", total_captured),
+                    format!("「衡」 子力平衡 (吃{}子)", total_captured),
                     Color::srgb(0.60, 0.58, 0.50),
                 )
             };
