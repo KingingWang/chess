@@ -16,7 +16,9 @@ use bevy::prelude::*;
 use chess_core::{Color as ChessColor, Game, Move};
 
 use crate::app_state::{AppState, BoardOrientation, GameMode};
+use crate::history_view::HistoryView;
 use crate::lan_dialog::LanDialog;
+use crate::sound::{MoveSound, PendingSound};
 use chess_net::{
     host_handshake_on, wait_for_peer_joined, Connection, HandshakeError, InboundEvent, Message,
     NetError, RelayClientConfig, Role, Server, Session,
@@ -493,6 +495,7 @@ fn connect_error_message(mode: GameMode) -> String {
 }
 
 /// Bevy system: drain peer events and apply them to the authoritative game.
+#[allow(clippy::too_many_arguments)]
 pub fn poll_net_events(
     mut commands: Commands,
     link: Option<Res<NetLink>>,
@@ -501,6 +504,8 @@ pub fn poll_net_events(
     mut orient: ResMut<BoardOrientation>,
     mut next: ResMut<NextState<AppState>>,
     mut dialog: ResMut<LanDialog>,
+    mut pending_sound: ResMut<PendingSound>,
+    mut history_view: ResMut<HistoryView>,
 ) {
     let Some(link) = link else {
         return;
@@ -556,8 +561,20 @@ pub fn poll_net_events(
                 info!("synchronised with host's game state");
             }
             NetEvent::PeerMove(mv) => {
+                let is_capture = core.game.board().piece_at(mv.to).is_some();
                 crate::moves::apply_local_move(&mut core, mv);
+                history_view.return_to_live();
+                let is_check = core.game.board().is_in_check(core.game.side_to_move());
                 dirty.0 = true;
+                let moved_piece = core.game.board().piece_at(mv.to).map(|p| p.kind);
+                pending_sound.sound = Some(if is_check {
+                    MoveSound::Check
+                } else if is_capture {
+                    MoveSound::Capture
+                } else {
+                    MoveSound::Normal
+                });
+                pending_sound.piece = moved_piece;
             }
             NetEvent::PeerResign => {
                 let winner = core.local_color;
@@ -604,6 +621,9 @@ mod tests {
         app.insert_resource(RenderDirty::default());
         app.insert_resource(BoardOrientation::default());
         app.insert_resource(LanDialog::default());
+        app.insert_resource(PendingSound::default());
+        app.insert_resource(crate::animation::AnimationPlaying::default());
+        app.insert_resource(crate::history_view::HistoryView::default());
         app.add_systems(Update, poll_net_events);
         app
     }

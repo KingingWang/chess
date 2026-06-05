@@ -16,6 +16,8 @@ chess-net = { workspace = true }
 tokio = { workspace = true }
 crossbeam-channel = "0.5"
 tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [dependencies.bevy]
 version = "0.18"
@@ -32,4 +34,6 @@ features = [
     "x11",
     "wayland",
     "multi_threaded",
+    "bevy_audio",
+    "wav",
 ]

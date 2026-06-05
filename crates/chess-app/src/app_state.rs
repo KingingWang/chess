@@ -3,6 +3,22 @@
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, Game, Square};
 
+/// Standard piece value for material evaluation.
+///
+/// Shared by the captured tray, status text, resign dialog, and game-over
+/// summary to avoid duplicating the 7-arm match across files.
+pub fn piece_value(kind: chess_core::PieceKind) -> i32 {
+    match kind {
+        chess_core::PieceKind::Chariot => 9,
+        chess_core::PieceKind::Horse => 4,
+        chess_core::PieceKind::Cannon => 4,
+        chess_core::PieceKind::Elephant => 2,
+        chess_core::PieceKind::Advisor => 2,
+        chess_core::PieceKind::Pawn => 1,
+        chess_core::PieceKind::King => 0,
+    }
+}
+
 /// Top-level UI flow.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -127,6 +143,7 @@ impl CoreGame {
 
 /// Currently selected source square (for click-to-move).
 #[derive(Resource, Default)]
+#[allow(dead_code)]
 pub struct Selection {
     pub from: Option<chess_core::Square>,
 }
@@ -270,5 +287,84 @@ mod tests {
             BoardOrientation::from_color(ChessColor::Black),
             BoardOrientation::Black
         );
+    }
+}
+
+/// Resource holding the game clock (optional; `None` for unlimited games).
+#[derive(Resource, Default)]
+#[allow(dead_code)]
+pub struct ClockResource {
+    pub clock: Option<chess_core::GameClock>,
+}
+
+/// Counts consecutive rematches in the current session.
+#[derive(Resource, Default)]
+pub struct RematchCount(pub u32);
+/// Tracks win/loss/draw record for the current play session.
+#[derive(Resource, Default)]
+pub struct SessionStats {
+    pub wins: u32,
+    pub losses: u32,
+    pub draws: u32,
+}
+
+impl SessionStats {
+    /// Total games played this session.
+    pub fn total(&self) -> u32 {
+        self.wins + self.losses + self.draws
+    }
+}
+
+/// Timestamp (app-time) when the current in-game session started.
+/// Stores the result of the most recent game for display on the menu screen.
+#[derive(Resource, Default)]
+pub struct LastGameResult(pub Option<chess_core::GameResult>);
+
+/// Used for accurate game duration tracking across multiple games.
+#[derive(Resource, Default)]
+pub struct GameStartTime(pub f32);
+/// Double-press guard for the "返回主菜单" HUD button.
+#[derive(Resource, Default)]
+pub struct BackToMenuPending(pub Option<f32>);
+
+/// Double-press guard for the local draw offer button.
+#[derive(Resource, Default)]
+pub struct DrawOfferPending(pub Option<f32>);
+/// Cumulative play time across the session (seconds).
+#[derive(Resource, Default)]
+pub struct SessionPlayTime(pub f32);
+/// Tracks how many undos have been performed in the current game.
+#[derive(Resource, Default)]
+pub struct UndoCount(pub u32);
+/// Consecutive win count (VsAi only).
+#[derive(Resource, Default)]
+pub struct WinStreak(pub u32);
+
+/// System that records the game start time on entering InGame state.
+pub fn record_game_start_time(
+    time: Res<bevy::prelude::Time>,
+    mut start: ResMut<GameStartTime>,
+    mut move_times: ResMut<MoveTimeHistory>,
+) {
+    start.0 = time.elapsed_secs();
+    move_times.0.clear();
+}
+
+/// Per-move elapsed time history (in seconds).
+///
+/// Each entry corresponds to the time taken for the move at that ply index.
+/// Self-heals via truncation when game state rewinds (undo, restart).
+#[derive(Resource, Default)]
+pub struct MoveTimeHistory(pub Vec<f32>);
+
+impl MoveTimeHistory {
+    /// Format elapsed seconds as a compact string: "5s" or "1:23".
+    pub fn format_time(secs: f32) -> String {
+        let s = secs as u32;
+        if s >= 60 {
+            format!("{}:{:02}", s / 60, s % 60)
+        } else {
+            format!("{}s", s)
+        }
     }
 }
