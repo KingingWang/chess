@@ -259,6 +259,7 @@ fn main() {
             OnExit(AppState::InGame),
             (
                 board_view::teardown_board,
+                net_bridge::teardown_net,
                 ui::teardown_hud,
                 history_panel::teardown_history_panel,
                 clock_ui::teardown_clock_ui,

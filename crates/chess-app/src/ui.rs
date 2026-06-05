@@ -204,15 +204,13 @@ pub fn setup_menu(
                 for (idx, (label, mode)) in [
                     ("本地双人对弈", GameMode::LocalPvp),
                     ("人机对战", GameMode::VsAi),
-                    ("局域网创建房间", GameMode::LanHost),
-                    ("局域网加入房间", GameMode::LanJoin),
-                    ("互联网创建房间", GameMode::RelayHost),
-                    ("互联网加入房间", GameMode::RelayJoin),
+                    ("创建房间", GameMode::LanHost),
+                    ("加入房间", GameMode::LanJoin),
                 ]
                 .into_iter()
                 .enumerate()
                 {
-                    // Divider between local modes (0-1) and network modes (2-5).
+                    // Divider between local modes (0-1) and network modes (2-3).
                     if idx == 2 {
                         card.spawn((
                             Node {
@@ -320,13 +318,9 @@ pub fn menu_interaction(
     for (interaction, btn, mut bg) in &mut interactions {
         match *interaction {
             Interaction::Pressed => match btn.0 {
-                // LAN modes open the setup dialog (port / IP / password) first.
+                // Network modes open the setup dialog (transport / port / password).
                 GameMode::LanHost => dialog.open_for(true),
                 GameMode::LanJoin => dialog.open_for(false),
-                // Relay modes also open the dialog.
-                GameMode::RelayHost | GameMode::RelayJoin => {
-                    dialog.open_for(btn.0 == GameMode::RelayHost);
-                }
                 // AI mode: open difficulty picker first.
                 GameMode::VsAi => {
                     diff_state.open = true;
@@ -897,7 +891,6 @@ pub fn teardown_hud(mut commands: Commands, q: Query<Entity, With<HudRoot>>) {
     for e in &q {
         commands.entity(e).despawn();
     }
-    commands.remove_resource::<NetLink>();
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,7 +1152,7 @@ pub fn menu_keyboard_nav(
     mut dialog: ResMut<crate::lan_dialog::LanDialog>,
     mut diff_state: ResMut<crate::difficulty_dialog::DifficultyDialogState>,
 ) {
-    const BUTTON_COUNT: usize = 6;
+    const BUTTON_COUNT: usize = 4;
 
     if keys.just_pressed(KeyCode::ArrowDown) {
         sel.0 = (sel.0 + 1) % BUTTON_COUNT;
@@ -1178,8 +1171,6 @@ pub fn menu_keyboard_nav(
         GameMode::VsAi,
         GameMode::LanHost,
         GameMode::LanJoin,
-        GameMode::RelayHost,
-        GameMode::RelayJoin,
     ];
     for (btn, mut bg) in &mut buttons {
         let idx = modes.iter().position(|m| *m == btn.0);
@@ -1196,9 +1187,6 @@ pub fn menu_keyboard_nav(
         match mode {
             GameMode::LanHost => dialog.open_for(true),
             GameMode::LanJoin => dialog.open_for(false),
-            GameMode::RelayHost | GameMode::RelayJoin => {
-                dialog.open_for(mode == GameMode::RelayHost);
-            }
             GameMode::VsAi => {
                 diff_state.open = true;
             }

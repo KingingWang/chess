@@ -85,6 +85,9 @@ pub enum NetEvent {
 pub struct NetLink {
     pub out: Sender<NetCommand>,
     pub inbound: Receiver<NetEvent>,
+    /// Handle to the Tokio task. Aborted on drop (via [`teardown_net`]) so that
+    /// host-mode listeners release their ports immediately.
+    pub task: tokio::task::JoinHandle<()>,
 }
 
 /// Spawn the network task for the given target, returning the [`NetLink`].
@@ -98,7 +101,7 @@ pub fn start_net(
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<NetCommand>();
     let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
 
-    runtime.spawn(async move {
+    let task = runtime.spawn(async move {
         match target {
             NetTarget::Lan {
                 role: Role::Host,
@@ -120,6 +123,7 @@ pub fn start_net(
     NetLink {
         out: cmd_tx,
         inbound: evt_rx,
+        task,
     }
 }
 
@@ -527,6 +531,7 @@ pub fn poll_net_events(
             dialog.rebuild = true;
             core.awaiting_peer = false;
             core.room_code = None;
+            link.task.abort();
             commands.remove_resource::<NetLink>();
             next.set(AppState::Menu);
             return;
@@ -607,6 +612,17 @@ pub fn poll_net_events(
     }
 }
 
+/// Abort the network task when leaving the game state so that host-mode TCP
+/// listeners (and relay WebSocket connections) are released immediately.
+/// Without this the LAN host task stays blocked on `Server::accept_one` and
+/// the port remains bound, preventing a new room from being created.
+pub fn teardown_net(mut commands: Commands, link: Option<ResMut<NetLink>>) {
+    if let Some(link) = link {
+        link.task.abort();
+        commands.remove_resource::<NetLink>();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,10 +648,17 @@ mod tests {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<NetCommand>();
         let (evt_tx, evt_rx) = crossbeam_channel::unbounded::<NetEvent>();
         evt_tx.send(event).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let task = rt.spawn(async {});
+        // Leak the runtime so the handle stays valid for the test.
+        std::mem::forget(rt);
         (
             NetLink {
                 out: cmd_tx,
                 inbound: evt_rx,
+                task,
             },
             cmd_rx,
         )
