@@ -15,18 +15,26 @@
 //! (白脸将) prohibition.
 
 pub mod board;
+pub mod clock;
 pub mod fen;
 pub mod game;
 pub mod moves;
+pub mod notation;
+pub mod pgn;
 pub mod piece;
 pub mod square;
+pub mod zobrist;
 
 pub use board::Board;
+pub use clock::{GameClock, TimeControl};
 pub use fen::{FenError, START_FEN};
-pub use game::{DrawReason, Game, GameResult, IllegalMove, WinReason};
+pub use game::{DrawReason, Game, GameResult, HistoryEntry, IllegalMove, WinReason};
 pub use moves::{Move, UndoState};
+pub use notation::move_to_chinese;
+pub use pgn::GameRecord;
 pub use piece::{Color, Piece, PieceKind};
 pub use square::Square;
+pub use zobrist::{hash_board, piece_square_key, side_key, update_hash};
 
 #[cfg(test)]
 mod tests;

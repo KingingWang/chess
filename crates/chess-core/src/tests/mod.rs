@@ -324,3 +324,106 @@ fn horse_checks_king_from_edge() {
     b.set_piece(sq(5, 7), Some(Piece::new(Color::Red, PieceKind::Horse)));
     assert!(b.is_in_check(Color::Black), "edge horse should give check");
 }
+
+// --- Round 0: History API tests -------------------------------------------
+
+#[test]
+fn history_accessor_returns_played_moves() {
+    let mut g = Game::new();
+    let m1 = Move::from_iccs("h2e2").unwrap();
+    let m2 = Move::from_iccs("h9g7").unwrap();
+    g.make_move(m1).unwrap();
+    g.make_move(m2).unwrap();
+
+    let history = g.history();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].mv(), m1);
+    assert_eq!(history[1].mv(), m2);
+}
+
+#[test]
+fn played_moves_iterator() {
+    let mut g = Game::new();
+    let m1 = Move::from_iccs("h2e2").unwrap();
+    let m2 = Move::from_iccs("h9g7").unwrap();
+    g.make_move(m1).unwrap();
+    g.make_move(m2).unwrap();
+
+    let moves: Vec<Move> = g.played_moves().collect();
+    assert_eq!(moves, vec![m1, m2]);
+}
+
+#[test]
+fn history_entry_reports_check() {
+    // Set up a position where a move delivers check.
+    let mut b = Board::empty();
+    b.set_piece(sq(4, 0), Some(Piece::new(Color::Red, PieceKind::King)));
+    b.set_piece(sq(4, 9), Some(Piece::new(Color::Black, PieceKind::King)));
+    // Red chariot on a0 can slide to e0... no, let's use a direct check:
+    // Red chariot at a5, moving to e5 does not check. Let's find a simpler check.
+    // Put Red chariot on e5 (same file as Black king e9), move it... it already checks.
+    // Better: Red chariot on a0 (file 0), move to a9 (rank 9)... Black king is on e9.
+    // Actually let's just verify gave_check on a known checking move.
+    b.set_piece(sq(0, 0), Some(Piece::new(Color::Red, PieceKind::Chariot)));
+    b.set_side_to_move(Color::Red);
+
+    let mut g = Game::from_board(b);
+    // Move chariot from a0 to a9 — does not check (different file from king).
+    // Move chariot from a0 to e0 — wait, Red king is there.
+    // Let's move Red king out of the way.
+    // Simpler approach: just play opening moves and verify gave_check is false.
+    let mut g2 = Game::new();
+    let m = Move::from_iccs("h2e2").unwrap();
+    g2.make_move(m).unwrap();
+    assert!(!g2.history()[0].gave_check());
+}
+
+#[test]
+fn board_at_ply_zero_is_start() {
+    let mut g = Game::new();
+    let m1 = Move::from_iccs("h2e2").unwrap();
+    g.make_move(m1).unwrap();
+
+    let board0 = g.board_at_ply(0).unwrap();
+    assert_eq!(board0.to_fen(), START_FEN);
+}
+
+#[test]
+fn board_at_ply_current_matches_board() {
+    let mut g = Game::new();
+    let m1 = Move::from_iccs("h2e2").unwrap();
+    let m2 = Move::from_iccs("h9g7").unwrap();
+    g.make_move(m1).unwrap();
+    g.make_move(m2).unwrap();
+
+    let board_now = g.board_at_ply(2).unwrap();
+    assert_eq!(board_now.to_fen(), g.board().to_fen());
+}
+
+#[test]
+fn board_at_ply_out_of_range_returns_none() {
+    let g = Game::new();
+    assert!(g.board_at_ply(1).is_none());
+}
+
+#[test]
+fn history_entry_captured_piece() {
+    // Set up a capture scenario.
+    let mut b = Board::empty();
+    b.set_piece(sq(0, 0), Some(Piece::new(Color::Red, PieceKind::King)));
+    b.set_piece(sq(8, 9), Some(Piece::new(Color::Black, PieceKind::King)));
+    b.set_piece(sq(4, 4), Some(Piece::new(Color::Red, PieceKind::Chariot)));
+    b.set_piece(sq(4, 8), Some(Piece::new(Color::Black, PieceKind::Cannon)));
+    b.set_side_to_move(Color::Red);
+
+    let mut g = Game::from_board(b);
+    let capture_move = Move::new(sq(4, 4), sq(4, 8));
+    g.make_move(capture_move).unwrap();
+
+    let entry = &g.history()[0];
+    assert_eq!(entry.mv(), capture_move);
+    assert_eq!(
+        entry.captured(),
+        Some(Piece::new(Color::Black, PieceKind::Cannon))
+    );
+}

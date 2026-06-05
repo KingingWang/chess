@@ -30,6 +30,8 @@ pub enum WinReason {
     Resignation,
     /// 长将 — opponent gave perpetual check and must yield.
     PerpetualCheck,
+    /// One side ran out of time on the clock.
+    Timeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,15 +56,48 @@ pub struct Game {
     halfmove_clock: u32,
 }
 
+/// A single entry in the game's move history.
+///
+/// Provides read-only access to the move played, whether it was a capture,
+/// whether it delivered check, and the board position before the move.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-struct HistoryEntry {
-    undo: UndoState,
+pub struct HistoryEntry {
+    pub(crate) undo: UndoState,
     /// FEN of the position *before* the move (placement + side only).
-    fen_before: String,
+    pub(crate) fen_before: String,
     /// Did this move deliver check to the opponent?
-    gave_check: bool,
-    halfmove_clock_before: u32,
+    pub(crate) gave_check: bool,
+    pub(crate) halfmove_clock_before: u32,
+}
+
+impl HistoryEntry {
+    /// The move that was played.
+    #[inline]
+    pub fn mv(&self) -> Move {
+        self.undo.mv
+    }
+
+    /// The piece captured by this move, if any.
+    #[inline]
+    pub fn captured(&self) -> Option<crate::piece::Piece> {
+        self.undo.captured
+    }
+
+    /// Whether this move delivered check to the opponent.
+    #[inline]
+    pub fn gave_check(&self) -> bool {
+        self.gave_check
+    }
+
+    /// FEN string of the position *before* this move was played.
+    ///
+    /// This is essential for move notation: Chinese notation needs the board
+    /// state before the move to determine the piece glyph and disambiguation.
+    #[inline]
+    pub fn fen_before(&self) -> &str {
+        &self.fen_before
+    }
 }
 
 impl Default for Game {
@@ -169,6 +204,11 @@ impl Game {
         self.result = Some(GameResult::Draw(DrawReason::Agreement));
     }
 
+    /// Force a specific result (e.g., timeout, external adjudication).
+    pub fn force_result(&mut self, result: GameResult) {
+        self.result = Some(result);
+    }
+
     /// Recompute terminal status after the most recent move.
     fn compute_result(&self) -> Option<GameResult> {
         let side = self.board.side_to_move();
@@ -209,7 +249,7 @@ impl Game {
     }
 
     /// How many times the current position has appeared (including now).
-    fn repetition_count(&self) -> usize {
+    pub fn repetition_count(&self) -> usize {
         let current = self.board.to_fen();
         let mut count = 1; // current occurrence
         for entry in &self.history {
@@ -259,6 +299,55 @@ impl Game {
 
     pub fn history_len(&self) -> usize {
         self.history.len()
+    }
+
+    /// Read-only access to the full move history.
+    ///
+    /// Each entry records the move played, the board FEN before the move,
+    /// whether the move was a capture, and whether it gave check. This is
+    /// the data needed for move notation, game replay, and save/load.
+    #[inline]
+    pub fn history(&self) -> &[HistoryEntry] {
+        &self.history
+    }
+
+    /// Iterator over just the moves played, in order.
+    pub fn played_moves(&self) -> impl Iterator<Item = Move> + '_ {
+        self.history.iter().map(|e| e.undo.mv)
+    }
+
+    /// Reconstruct the board state at a given ply (0 = initial position,
+    /// `history_len()` = current position). Returns `None` if `ply` is out
+    /// of range.
+    pub fn board_at_ply(&self, ply: usize) -> Option<Board> {
+        if ply > self.history.len() {
+            return None;
+        }
+        // Replay from the initial position recorded in history.
+        // If ply == 0, parse the first entry's fen_before (which is the
+        // start position). If there is no history, ply must be 0 and we
+        // return the current board.
+        if self.history.is_empty() {
+            return if ply == 0 {
+                Some(self.board.clone())
+            } else {
+                None
+            };
+        }
+        let mut board: Board = self.history[0]
+            .fen_before
+            .parse()
+            .expect("stored FEN is always valid");
+        for entry in self.history.iter().take(ply) {
+            board.make_move(entry.undo.mv);
+        }
+        Some(board)
+    }
+
+    /// The current half-move clock (halfmoves since the last capture).
+    #[inline]
+    pub fn halfmove_clock(&self) -> u32 {
+        self.halfmove_clock
     }
 }
 
