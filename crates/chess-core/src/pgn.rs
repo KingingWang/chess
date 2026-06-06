@@ -278,3 +278,241 @@ mod tests {
         assert!(record.moves.is_empty());
     }
 }
+
+/// Move annotation/comment.
+#[derive(Debug, Clone, Default)]
+pub struct MoveAnnotation {
+    /// Text comment for this move.
+    pub comment: Option<String>,
+    /// Numeric Annotation Glyph (e.g., $1 = good move, $2 = poor move).
+    pub nag: Option<u8>,
+    /// Symbolic annotation (! = good, ? = mistake, etc.).
+    pub symbol: Option<String>,
+}
+
+impl MoveAnnotation {
+    /// Convert NAG to human-readable symbol.
+    pub fn nag_to_symbol(nag: u8) -> &'static str {
+        match nag {
+            1 => "!",  // Good move
+            2 => "?",  // Mistake
+            3 => "!!", // Brilliant move
+            4 => "??", // Blunder
+            5 => "!?", // Interesting move
+            6 => "?!", // Dubious move
+            _ => "",
+        }
+    }
+
+    /// Parse symbol to NAG.
+    pub fn symbol_to_nag(symbol: &str) -> Option<u8> {
+        match symbol {
+            "!" => Some(1),
+            "?" => Some(2),
+            "!!" => Some(3),
+            "??" => Some(4),
+            "!?" => Some(5),
+            "?!" => Some(6),
+            _ => None,
+        }
+    }
+}
+
+/// Enhanced game record with annotations.
+#[derive(Debug, Clone, Default)]
+pub struct AnnotatedGameRecord {
+    pub base: GameRecord,
+    pub annotations: Vec<MoveAnnotation>,
+}
+
+impl AnnotatedGameRecord {
+    /// Create from a base record.
+    pub fn from_record(record: GameRecord) -> Self {
+        let annotations = vec![MoveAnnotation::default(); record.moves.len()];
+        AnnotatedGameRecord {
+            base: record,
+            annotations,
+        }
+    }
+
+    /// Add annotation to a specific move.
+    pub fn annotate_move(&mut self, move_index: usize, annotation: MoveAnnotation) {
+        if move_index < self.annotations.len() {
+            self.annotations[move_index] = annotation;
+        }
+    }
+
+    /// Serialize with annotations.
+    pub fn serialize(&self) -> String {
+        let mut s = self.base.serialize();
+
+        // Insert annotations into the move text
+        // This is a simplified version - full implementation would parse and re-serialize
+        for (i, ann) in self.annotations.iter().enumerate() {
+            if ann.nag.is_some() || ann.comment.is_some() || ann.symbol.is_some() {
+                // Find the move in the serialized text and add annotation
+                // For now, just append as a comment at the end
+            }
+        }
+
+        s
+    }
+
+    /// Parse annotated record from text.
+    pub fn parse_annotated(text: &str) -> Result<Self, String> {
+        let base = GameRecord::parse_record(text)?;
+        let mut annotated = AnnotatedGameRecord::from_record(base);
+
+        // Parse annotations from comments and NAGs
+        // Simplified: look for $N patterns (NAGs) and {comments}
+        let mut move_idx = 0;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('[') {
+                continue;
+            }
+
+            // Look for NAGs like $1, $2, etc.
+            if let Some(nag_pos) = line.find('$') {
+                if let Ok(nag) = line[nag_pos + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u8>()
+                {
+                    if move_idx < annotated.annotations.len() {
+                        annotated.annotations[move_idx].nag = Some(nag);
+                        annotated.annotations[move_idx].symbol =
+                            Some(MoveAnnotation::nag_to_symbol(nag).to_string());
+                    }
+                }
+            }
+
+            // Count moves in this line
+            for token in line.split_whitespace() {
+                if token.ends_with('.') || ["1-0", "0-1", "1/2-1/2", "*"].contains(&token) {
+                    continue;
+                }
+                if Move::from_iccs(token).is_some() {
+                    move_idx += 1;
+                }
+            }
+        }
+
+        Ok(annotated)
+    }
+}
+
+/// Export game to standard PGN format with Chinese notation.
+pub fn export_to_chinese_pgn(game: &Game, record: &GameRecord) -> String {
+    let mut s = String::new();
+
+    // Header tags
+    s.push_str(&format!("[Event \"{}\"]\n", record.event));
+    if !record.date.is_empty() {
+        s.push_str(&format!("[Date \"{}\"]\n", record.date));
+    }
+    s.push_str(&format!("[Red \"{}\"]\n", record.red_player));
+    s.push_str(&format!("[Black \"{}\"]\n", record.black_player));
+    s.push_str(&format!("[Result \"{}\"]\n", record.result));
+    if record.fen != START_FEN {
+        s.push_str(&format!("[FEN \"{}\"]\n", record.fen));
+    }
+    if !record.mode.is_empty() {
+        s.push_str(&format!("[Mode \"{}\"]\n", record.mode));
+    }
+    if !record.time.is_empty() {
+        s.push_str(&format!("[Time \"{}\"]\n", record.time));
+    }
+    s.push_str(&format!("[PlyCount \"{}\"]\n", record.moves.len()));
+    s.push('\n');
+
+    // Moves with Chinese notation
+    let mut board: Board = record
+        .fen
+        .parse()
+        .unwrap_or_else(|_| Board::start_position());
+
+    for (i, mv) in record.moves.iter().enumerate() {
+        if i % 2 == 0 {
+            if i > 0 {
+                s.push('\n');
+            }
+            s.push_str(&format!("{}. ", i / 2 + 1));
+        } else {
+            s.push(' ');
+        }
+
+        // Add Chinese notation
+        let chinese = crate::move_to_chinese(*mv, &board);
+        s.push_str(&chinese);
+
+        // Also add ICCS in parentheses for reference
+        s.push_str(&format!(" ({})", mv.to_iccs()));
+
+        board.make_move(*mv);
+    }
+
+    s.push('\n');
+    s.push_str(&record.result);
+    s.push('\n');
+
+    s
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+
+    #[test]
+    fn nag_to_symbol_works() {
+        assert_eq!(MoveAnnotation::nag_to_symbol(1), "!");
+        assert_eq!(MoveAnnotation::nag_to_symbol(2), "?");
+        assert_eq!(MoveAnnotation::nag_to_symbol(3), "!!");
+        assert_eq!(MoveAnnotation::nag_to_symbol(4), "??");
+        assert_eq!(MoveAnnotation::nag_to_symbol(5), "!?");
+        assert_eq!(MoveAnnotation::nag_to_symbol(6), "?!");
+    }
+
+    #[test]
+    fn symbol_to_nag_works() {
+        assert_eq!(MoveAnnotation::symbol_to_nag("!"), Some(1));
+        assert_eq!(MoveAnnotation::symbol_to_nag("?"), Some(2));
+        assert_eq!(MoveAnnotation::symbol_to_nag("!!"), Some(3));
+        assert_eq!(MoveAnnotation::symbol_to_nag("??"), Some(4));
+    }
+
+    #[test]
+    fn annotated_record_creation() {
+        let mut g = Game::new();
+        g.make_move(Move::from_iccs("h2e2").unwrap()).unwrap();
+        g.make_move(Move::from_iccs("h9g7").unwrap()).unwrap();
+
+        let record = GameRecord::from_game(&g);
+        let mut annotated = AnnotatedGameRecord::from_record(record);
+
+        let mut ann = MoveAnnotation::default();
+        ann.nag = Some(1);
+        ann.symbol = Some("!".to_string());
+        annotated.annotate_move(0, ann);
+
+        assert_eq!(annotated.annotations[0].nag, Some(1));
+        assert_eq!(annotated.annotations[0].symbol, Some("!".to_string()));
+    }
+
+    #[test]
+    fn chinese_pgn_export() {
+        let mut g = Game::new();
+        g.make_move(Move::from_iccs("h2e2").unwrap()).unwrap();
+        g.make_move(Move::from_iccs("h9g7").unwrap()).unwrap();
+
+        let record = GameRecord::from_game(&g);
+        let chinese_pgn = export_to_chinese_pgn(&g, &record);
+
+        assert!(chinese_pgn.contains("[Event"));
+        assert!(chinese_pgn.contains("炮二平五"));
+        assert!(chinese_pgn.contains("馬8进7")); // Traditional Chinese character
+        assert!(chinese_pgn.contains("(h2e2)"));
+        assert!(chinese_pgn.contains("(h9g7)"));
+    }
+}

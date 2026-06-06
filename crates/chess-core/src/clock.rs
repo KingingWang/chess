@@ -33,20 +33,81 @@ pub enum TimeControl {
 
 impl TimeControl {
     /// Common presets.
+    pub const BULLET_1_0: TimeControl = TimeControl::Fischer {
+        total_seconds: 60,
+        increment_seconds: 0,
+    };
+    pub const BULLET_1_1: TimeControl = TimeControl::Fischer {
+        total_seconds: 60,
+        increment_seconds: 1,
+    };
+    pub const BLITZ_3_0: TimeControl = TimeControl::Fischer {
+        total_seconds: 180,
+        increment_seconds: 0,
+    };
     pub const BLITZ_3_2: TimeControl = TimeControl::Fischer {
         total_seconds: 180,
         increment_seconds: 2,
+    };
+    pub const BLITZ_5_3: TimeControl = TimeControl::Fischer {
+        total_seconds: 300,
+        increment_seconds: 3,
     };
     pub const RAPID_10_5: TimeControl = TimeControl::Fischer {
         total_seconds: 600,
         increment_seconds: 5,
     };
+    pub const RAPID_15_10: TimeControl = TimeControl::Fischer {
+        total_seconds: 900,
+        increment_seconds: 10,
+    };
     pub const CLASSICAL_30_0: TimeControl = TimeControl::Fischer {
         total_seconds: 1800,
         increment_seconds: 0,
     };
+    pub const CLASSICAL_30_20: TimeControl = TimeControl::Fischer {
+        total_seconds: 1800,
+        increment_seconds: 20,
+    };
     pub const PER_MOVE_30: TimeControl = TimeControl::PerMove { seconds: 30 };
     pub const PER_MOVE_60: TimeControl = TimeControl::PerMove { seconds: 60 };
+
+    /// Get a human-readable label for this time control.
+    pub fn label(&self) -> String {
+        match self {
+            TimeControl::Unlimited => "无限时".to_string(),
+            TimeControl::PerMove { seconds } => format!("每步{}秒", seconds),
+            TimeControl::Fischer {
+                total_seconds,
+                increment_seconds,
+            } => {
+                let mins = total_seconds / 60;
+                if *increment_seconds > 0 {
+                    format!("{}+{}", mins, increment_seconds)
+                } else {
+                    format!("{}分钟", mins)
+                }
+            }
+        }
+    }
+
+    /// Get all available presets.
+    pub fn all_presets() -> Vec<TimeControl> {
+        vec![
+            TimeControl::Unlimited,
+            TimeControl::BULLET_1_0,
+            TimeControl::BULLET_1_1,
+            TimeControl::BLITZ_3_0,
+            TimeControl::BLITZ_3_2,
+            TimeControl::BLITZ_5_3,
+            TimeControl::RAPID_10_5,
+            TimeControl::RAPID_15_10,
+            TimeControl::CLASSICAL_30_0,
+            TimeControl::CLASSICAL_30_20,
+            TimeControl::PER_MOVE_30,
+            TimeControl::PER_MOVE_60,
+        ]
+    }
 }
 
 /// Live game clock state for both players.
@@ -243,5 +304,28 @@ mod tests {
         assert_eq!(GameClock::format_time(Duration::from_secs(0)), "0:00");
         assert_eq!(GameClock::format_time(Duration::from_secs(65)), "1:05");
         assert_eq!(GameClock::format_time(Duration::from_secs(3661)), "1:01:01");
+    }
+
+    #[test]
+    fn test_time_control_labels() {
+        assert_eq!(TimeControl::Unlimited.label(), "无限时");
+        assert_eq!(TimeControl::PER_MOVE_30.label(), "每步30秒");
+        assert_eq!(TimeControl::BLITZ_3_2.label(), "3+2");
+        assert_eq!(TimeControl::RAPID_15_10.label(), "15+10");
+        assert_eq!(TimeControl::CLASSICAL_30_0.label(), "30分钟");
+    }
+
+    #[test]
+    fn test_all_presets() {
+        let presets = TimeControl::all_presets();
+        assert_eq!(presets.len(), 12);
+        assert_eq!(presets[0], TimeControl::Unlimited);
+    }
+
+    #[test]
+    fn bullet_time_control() {
+        let clock = GameClock::new(TimeControl::BULLET_1_0);
+        assert_eq!(clock.remaining(Color::Red), Duration::from_secs(60));
+        assert_eq!(clock.remaining(Color::Black), Duration::from_secs(60));
     }
 }

@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use chess_core::{Board, Move};
 
-pub use search::{SearchLimits, SearchResult};
+pub use search::{SearchInfo, SearchInfoSink, SearchLimits, SearchResult};
 pub use uci::{UciConfig, UciEngine, UciError};
 
 /// Difficulty presets mapping to think time and (for the built-in engine) a
@@ -153,6 +153,66 @@ impl Ai {
             },
         }
     }
+
+    /// Compute a move with real-time search info streaming to the GUI.
+    /// The `info_sink` receives [`SearchInfo`] updates during search.
+    pub async fn best_move_with_info(
+        &mut self,
+        board: &Board,
+        history: &[Move],
+        limits: SearchLimits,
+        use_book: bool,
+        info_sink: SearchInfoSink,
+    ) -> Option<Move> {
+        match self {
+            Ai::Builtin => {
+                // Try opening book first (skip for Easy difficulty).
+                if use_book {
+                    if let Some(book_mv) = get_book().lookup(board) {
+                        tracing::info!(mv = %book_mv.to_iccs(), "book move");
+                        return Some(book_mv);
+                    }
+                }
+                let board = board.clone();
+                // Keep the CPU-bound search off the async/render thread.
+                tokio::task::spawn_blocking(move || {
+                    search::search_with_info(&board, limits, info_sink).best_move
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+            Ai::Uci(engine) => {
+                // For UCI engines, we still send a final info update.
+                match engine.best_move(board, history, limits.movetime).await {
+                    Ok(mv) => {
+                        // Send a minimal info for UCI (no PV available).
+                        if let Some(ref tx) = info_sink {
+                            let _ = tx.try_send(SearchInfo {
+                                depth: 0,
+                                score: 0,
+                                pv: vec![mv],
+                                nodes: 0,
+                                elapsed: std::time::Duration::ZERO,
+                                is_final: true,
+                            });
+                        }
+                        Some(mv)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "UCI move failed; falling back to built-in");
+                        let board = board.clone();
+                        tokio::task::spawn_blocking(move || {
+                            search::search_with_info(&board, limits, info_sink).best_move
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -233,3 +293,4 @@ mod tests {
         assert!(mv.is_some());
     }
 }
+pub mod endgame;

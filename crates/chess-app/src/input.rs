@@ -90,6 +90,8 @@ pub fn handle_click(
                 if p.color == side {
                     selection.from = Some(clicked);
                     dirty.0 = true;
+                    pending_sound.sound = Some(MoveSound::PieceSelect);
+                    pending_sound.piece = Some(p.kind);
                 }
             }
         }
@@ -104,6 +106,8 @@ pub fn handle_click(
                 if p.color == side {
                     selection.from = Some(clicked);
                     dirty.0 = true;
+                    pending_sound.sound = Some(MoveSound::PieceSelect);
+                    pending_sound.piece = Some(p.kind);
                     return;
                 }
             }

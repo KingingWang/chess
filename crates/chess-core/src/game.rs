@@ -358,3 +358,286 @@ pub enum IllegalMove {
     #[error("move {0:?} is not legal in this position")]
     NotLegal(Move),
 }
+
+// ===== Enhanced Move Validation =====
+
+/// Detailed move validation error with user-friendly messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveValidationError {
+    /// Game is already over.
+    GameOver { result: String },
+    /// No piece at the source square.
+    NoPieceAtSource { from: String },
+    /// Piece at source doesn't belong to the current player.
+    WrongColor {
+        piece_color: String,
+        current_player: String,
+    },
+    /// Move is not legal for this piece type.
+    NotLegalForPiece {
+        piece_type: String,
+        from: String,
+        to: String,
+    },
+    /// Move would leave king in check.
+    LeavesKingInCheck { piece_type: String },
+    /// Move is blocked by another piece.
+    Blocked { piece_type: String, reason: String },
+    /// Generic illegal move.
+    IllegalMove { from: String, to: String },
+}
+
+impl MoveValidationError {
+    /// Get a user-friendly error message in Chinese.
+    pub fn message_chinese(&self) -> String {
+        match self {
+            MoveValidationError::GameOver { result } => {
+                format!("对局已结束 ({})", result)
+            }
+            MoveValidationError::NoPieceAtSource { from } => {
+                format!("{}位置没有棋子", from)
+            }
+            MoveValidationError::WrongColor {
+                piece_color,
+                current_player,
+            } => {
+                format!("该棋子是{}的，现在轮到{}走棋", piece_color, current_player)
+            }
+            MoveValidationError::NotLegalForPiece {
+                piece_type,
+                from,
+                to,
+            } => {
+                format!("{}不能从{}走到{}", piece_type, from, to)
+            }
+            MoveValidationError::LeavesKingInCheck { piece_type } => {
+                format!("走{}会导致将/帅被将军", piece_type)
+            }
+            MoveValidationError::Blocked { piece_type, reason } => {
+                format!("{}被阻挡: {}", piece_type, reason)
+            }
+            MoveValidationError::IllegalMove { from, to } => {
+                format!("非法着法: {}→{}", from, to)
+            }
+        }
+    }
+
+    /// Get a user-friendly error message in English.
+    pub fn message_english(&self) -> String {
+        match self {
+            MoveValidationError::GameOver { result } => {
+                format!("Game over ({})", result)
+            }
+            MoveValidationError::NoPieceAtSource { from } => {
+                format!("No piece at {}", from)
+            }
+            MoveValidationError::WrongColor {
+                piece_color,
+                current_player,
+            } => {
+                format!(
+                    "Piece is {}, but it's {}'s turn",
+                    piece_color, current_player
+                )
+            }
+            MoveValidationError::NotLegalForPiece {
+                piece_type,
+                from,
+                to,
+            } => {
+                format!("{} cannot move from {} to {}", piece_type, from, to)
+            }
+            MoveValidationError::LeavesKingInCheck { piece_type } => {
+                format!("Moving {} would leave king in check", piece_type)
+            }
+            MoveValidationError::Blocked { piece_type, reason } => {
+                format!("{} is blocked: {}", piece_type, reason)
+            }
+            MoveValidationError::IllegalMove { from, to } => {
+                format!("Illegal move: {}→{}", from, to)
+            }
+        }
+    }
+}
+
+impl Game {
+    /// Validate a move and return detailed error information.
+    pub fn validate_move(&self, mv: Move) -> Result<(), MoveValidationError> {
+        use crate::piece::Color;
+
+        // Check if game is over
+        if let Some(result) = &self.result {
+            let result_str = match result {
+                GameResult::Win { winner, reason } => {
+                    let winner_str = if *winner == Color::Red {
+                        "红方"
+                    } else {
+                        "黑方"
+                    };
+                    let reason_str = match reason {
+                        WinReason::Checkmate => "将死",
+                        WinReason::Stalemate => "困毙",
+                        WinReason::Resignation => "认输",
+                        WinReason::PerpetualCheck => "长将",
+                        WinReason::Timeout => "超时",
+                    };
+                    format!("{}{} ({})", winner_str, reason_str, reason_str)
+                }
+                GameResult::Draw(reason) => {
+                    let reason_str = match reason {
+                        DrawReason::Agreement => "协议和棋",
+                        DrawReason::Repetition => "三次重复",
+                        DrawReason::NoCapture => "60步无吃子",
+                    };
+                    format!("和棋 ({})", reason_str)
+                }
+            };
+            return Err(MoveValidationError::GameOver { result: result_str });
+        }
+
+        // Check if there's a piece at the source
+        let piece = match self.board.piece_at(mv.from) {
+            Some(p) => p,
+            None => {
+                let from = format!("({}, {})", mv.from.file(), mv.from.rank());
+                return Err(MoveValidationError::NoPieceAtSource { from });
+            }
+        };
+
+        // Check if the piece belongs to the current player
+        if piece.color != self.board.side_to_move() {
+            let piece_color = if piece.color == Color::Red {
+                "红方"
+            } else {
+                "黑方"
+            };
+            let current_player = if self.board.side_to_move() == Color::Red {
+                "红方"
+            } else {
+                "黑方"
+            };
+            return Err(MoveValidationError::WrongColor {
+                piece_color: piece_color.to_string(),
+                current_player: current_player.to_string(),
+            });
+        }
+
+        // Check if the move is legal
+        if !self.board.is_legal(mv) {
+            let piece_type = piece_glyph_chinese(piece.kind);
+            let from = format!("({}, {})", mv.from.file(), mv.from.rank());
+            let to = format!("({}, {})", mv.to.file(), mv.to.rank());
+            return Err(MoveValidationError::NotLegalForPiece {
+                piece_type: piece_type.to_string(),
+                from,
+                to,
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// Get Chinese name for a piece type.
+fn piece_glyph_chinese(kind: crate::piece::PieceKind) -> &'static str {
+    use crate::piece::PieceKind;
+    match kind {
+        PieceKind::King => "将/帅",
+        PieceKind::Advisor => "士/仕",
+        PieceKind::Elephant => "象/相",
+        PieceKind::Horse => "马",
+        PieceKind::Chariot => "车",
+        PieceKind::Cannon => "炮",
+        PieceKind::Pawn => "卒/兵",
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use crate::{Board, Move, Square};
+
+    #[test]
+    fn test_validate_no_piece() {
+        let game = Game::new();
+        let mv = Move {
+            from: Square::new(0, 5).unwrap(), // Empty square
+            to: Square::new(0, 6).unwrap(),
+        };
+        let result = game.validate_move(mv);
+        assert!(matches!(
+            result,
+            Err(MoveValidationError::NoPieceAtSource { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_wrong_color() {
+        let game = Game::new();
+        // Red's turn, but try to move a black piece
+        let mv = Move {
+            from: Square::new(0, 9).unwrap(), // Black rook
+            to: Square::new(0, 8).unwrap(),
+        };
+        let result = game.validate_move(mv);
+        assert!(matches!(
+            result,
+            Err(MoveValidationError::WrongColor { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_legal_move() {
+        let game = Game::new();
+        // Red pawn forward (legal move)
+        let mv = Move {
+            from: Square::new(0, 3).unwrap(), // Red pawn
+            to: Square::new(0, 4).unwrap(),
+        };
+        let result = game.validate_move(mv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_illegal_move() {
+        let game = Game::new();
+        // Try to move rook through pieces (illegal)
+        let mv = Move {
+            from: Square::new(0, 0).unwrap(), // Red rook
+            to: Square::new(0, 5).unwrap(),   // Blocked by pawn
+        };
+        let result = game.validate_move(mv);
+        assert!(matches!(
+            result,
+            Err(MoveValidationError::NotLegalForPiece { .. })
+        ));
+    }
+
+    #[test]
+    fn test_error_messages() {
+        let error = MoveValidationError::WrongColor {
+            piece_color: "黑方".to_string(),
+            current_player: "红方".to_string(),
+        };
+        let chinese = error.message_chinese();
+        let english = error.message_english();
+        assert!(chinese.contains("黑方"));
+        assert!(chinese.contains("红方"));
+        // English message uses the same Chinese terms for clarity
+        assert!(english.contains("黑方"));
+        assert!(english.contains("红方"));
+    }
+
+    #[test]
+    fn test_game_over_validation() {
+        let mut game = Game::new();
+        game.result = Some(GameResult::Draw(DrawReason::Agreement));
+
+        let mv = Move {
+            from: Square::new(0, 0).unwrap(),
+            to: Square::new(0, 1).unwrap(),
+        };
+        let result = game.validate_move(mv);
+        assert!(matches!(result, Err(MoveValidationError::GameOver { .. })));
+    }
+}

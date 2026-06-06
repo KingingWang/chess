@@ -23,6 +23,9 @@ pub enum MoveSound {
     GameDraw,
     Undo,
     UiClick,
+    NewGame,
+    PieceSelect,
+    Checkmate,
 }
 
 /// Sound volume level.
@@ -96,6 +99,9 @@ pub struct SoundAssets {
     pub draw_sound: Handle<AudioSource>,
     pub undo_sound: Handle<AudioSource>,
     pub ui_click: Handle<AudioSource>,
+    pub new_game_sound: Handle<AudioSource>,
+    pub piece_select_sound: Handle<AudioSource>,
+    pub checkmate_sound: Handle<AudioSource>,
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +313,58 @@ fn gen_ui_click() -> Vec<u8> {
 // Bevy systems
 // ---------------------------------------------------------------------------
 
-/// Startup system: synthesise the three sound clips and store their handles.
+/// Rising three-note fanfare for starting a new game (C4→E4→G4, 300ms).
+fn gen_new_game_sound() -> Vec<u8> {
+    let note_len = (SAMPLE_RATE as f32 * 0.10) as usize;
+    let mut samples = Vec::with_capacity(note_len * 3);
+    for freq in [262.0f32, 330.0, 392.0] {
+        for s in 0..note_len {
+            let t = s as f32 / SAMPLE_RATE as f32;
+            let base = (2.0 * std::f32::consts::PI * freq * t).sin();
+            let harmonic = (2.0 * std::f32::consts::PI * freq * 2.0 * t).sin();
+            let wave = base + harmonic * 0.15;
+            let env = 1.0 - (s as f32 / note_len as f32).powi(2);
+            samples.push((wave * env * 0.30 * 32000.0) as i16);
+        }
+    }
+    make_wav(&samples)
+}
+
+/// Soft tap for piece selection (600 Hz, 15 ms).
+fn gen_piece_select_sound() -> Vec<u8> {
+    let base = sine_burst(600.0, 15, 0.18);
+    let h2 = sine_burst(1200.0, 15, 0.05);
+    let samples: Vec<i16> = base
+        .iter()
+        .zip(h2.iter())
+        .map(|(&a, &b)| a.saturating_add(b))
+        .collect();
+    make_wav(&samples)
+}
+
+/// Dramatic checkmate fanfare: four-note rising chord (C5→E5→G5→C6, 500ms).
+fn gen_checkmate_sound() -> Vec<u8> {
+    let note_len = (SAMPLE_RATE as f32 * 0.12) as usize;
+    let sustain = (SAMPLE_RATE as f32 * 0.02) as usize;
+    let mut samples = Vec::with_capacity(note_len * 4 + sustain * 3);
+    for freq in [523.0f32, 659.0, 784.0, 1047.0] {
+        for s in 0..note_len {
+            let t = s as f32 / SAMPLE_RATE as f32;
+            let base = (2.0 * std::f32::consts::PI * freq * t).sin();
+            let harmonic = (2.0 * std::f32::consts::PI * freq * 2.0 * t).sin();
+            let third = (2.0 * std::f32::consts::PI * freq * 3.0 * t).sin();
+            let wave = base + harmonic * 0.2 + third * 0.08;
+            let env = 1.0 - (s as f32 / note_len as f32).powi(3);
+            samples.push((wave * env * 0.35 * 32000.0) as i16);
+        }
+        if freq < 1000.0 {
+            samples.extend(std::iter::repeat_n(0i16, sustain));
+        }
+    }
+    make_wav(&samples)
+}
+
+/// Startup system: synthesise all sound clips and store their handles.
 pub fn init_sounds(mut commands: Commands, mut audio_assets: ResMut<Assets<AudioSource>>) {
     let move_bytes = gen_move_sound();
     let capture_bytes = gen_capture_sound();
@@ -318,6 +375,9 @@ pub fn init_sounds(mut commands: Commands, mut audio_assets: ResMut<Assets<Audio
     let draw_bytes = gen_draw_sound();
     let undo_bytes = gen_undo_sound();
     let ui_click_bytes = gen_ui_click();
+    let new_game_bytes = gen_new_game_sound();
+    let piece_select_bytes = gen_piece_select_sound();
+    let checkmate_bytes = gen_checkmate_sound();
 
     let move_sound = audio_assets.add(AudioSource {
         bytes: move_bytes.into(),
@@ -346,6 +406,15 @@ pub fn init_sounds(mut commands: Commands, mut audio_assets: ResMut<Assets<Audio
     let ui_click = audio_assets.add(AudioSource {
         bytes: ui_click_bytes.into(),
     });
+    let new_game_sound = audio_assets.add(AudioSource {
+        bytes: new_game_bytes.into(),
+    });
+    let piece_select_sound = audio_assets.add(AudioSource {
+        bytes: piece_select_bytes.into(),
+    });
+    let checkmate_sound = audio_assets.add(AudioSource {
+        bytes: checkmate_bytes.into(),
+    });
 
     commands.insert_resource(SoundAssets {
         move_sound,
@@ -357,6 +426,9 @@ pub fn init_sounds(mut commands: Commands, mut audio_assets: ResMut<Assets<Audio
         draw_sound,
         undo_sound,
         ui_click,
+        new_game_sound,
+        piece_select_sound,
+        checkmate_sound,
     });
 }
 
@@ -388,6 +460,9 @@ pub fn play_pending_sound(
         MoveSound::GameDraw => assets.draw_sound.clone(),
         MoveSound::Undo => assets.undo_sound.clone(),
         MoveSound::UiClick => assets.ui_click.clone(),
+        MoveSound::NewGame => assets.new_game_sound.clone(),
+        MoveSound::PieceSelect => assets.piece_select_sound.clone(),
+        MoveSound::Checkmate => assets.checkmate_sound.clone(),
     };
 
     // Piece-kind-based pitch variation for move/capture/check sounds.
@@ -450,4 +525,9 @@ pub fn play_pending_sound(
         }
         VolumeLevel::Mute => {} // already handled above
     }
+}
+
+/// Play a sound when entering a new game.
+pub fn play_new_game_sound(mut pending: ResMut<PendingSound>) {
+    pending.sound = Some(MoveSound::NewGame);
 }

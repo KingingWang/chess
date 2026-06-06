@@ -5,12 +5,15 @@
 //! hard-coded `const`s. The player can cycle through themes with the `T` key
 //! (handled in [`keyboard.rs`]).
 //!
-//! Five built-in themes:
+//! Eight built-in themes:
 //! - **Classic** — warm aged-paper wood tones (the original palette).
 //! - **Dark** — dark tournament green/brown.
 //! - **Paper** — light cream minimalist.
 //! - **Rosewood** — rich reddish-brown.
 //! - **Jade** — cool blue-green inspired by Chinese jade.
+//! - **Bamboo** — fresh green bamboo tones.
+//! - **Imperial** — regal purple and gold.
+//! - **Midnight** — deep navy blue night sky.
 
 use bevy::prelude::*;
 
@@ -46,6 +49,9 @@ pub enum ThemeId {
     Paper,
     Rosewood,
     Jade,
+    Bamboo,
+    Imperial,
+    Midnight,
 }
 
 impl ThemeId {
@@ -56,7 +62,10 @@ impl ThemeId {
             ThemeId::Dark => ThemeId::Paper,
             ThemeId::Paper => ThemeId::Rosewood,
             ThemeId::Rosewood => ThemeId::Jade,
-            ThemeId::Jade => ThemeId::Classic,
+            ThemeId::Jade => ThemeId::Bamboo,
+            ThemeId::Bamboo => ThemeId::Imperial,
+            ThemeId::Imperial => ThemeId::Midnight,
+            ThemeId::Midnight => ThemeId::Classic,
         }
     }
 
@@ -68,6 +77,9 @@ impl ThemeId {
             ThemeId::Paper => "素纸",
             ThemeId::Rosewood => "红木",
             ThemeId::Jade => "翡翠",
+            ThemeId::Bamboo => "青竹",
+            ThemeId::Imperial => "帝王",
+            ThemeId::Midnight => "午夜",
         }
     }
     /// Emoji icon for this theme.
@@ -78,6 +90,9 @@ impl ThemeId {
             ThemeId::Paper => "「素」",
             ThemeId::Rosewood => "「檀」",
             ThemeId::Jade => "「翠」",
+            ThemeId::Bamboo => "「竹」",
+            ThemeId::Imperial => "「皇」",
+            ThemeId::Midnight => "「夜」",
         }
     }
 }
@@ -139,6 +154,39 @@ impl ThemeId {
                 red_ink: Color::srgb(0.78, 0.15, 0.10),
                 black_ink: Color::srgb(0.08, 0.12, 0.10),
                 disc_border: Color::srgba(0.05, 0.15, 0.10, 0.18),
+            },
+            ThemeId::Bamboo => Palette {
+                frame_dark: Color::srgb(0.12, 0.20, 0.08),
+                frame_edge: Color::srgb(0.25, 0.38, 0.15),
+                board_bg: Color::srgb(0.72, 0.85, 0.58),
+                line_color: Color::srgb(0.18, 0.28, 0.12),
+                river_color: Color::srgba(0.18, 0.28, 0.12, 0.45),
+                disc_face: Color::srgb(0.96, 0.97, 0.90),
+                red_ink: Color::srgb(0.80, 0.18, 0.10),
+                black_ink: Color::srgb(0.10, 0.14, 0.08),
+                disc_border: Color::srgba(0.10, 0.18, 0.08, 0.16),
+            },
+            ThemeId::Imperial => Palette {
+                frame_dark: Color::srgb(0.15, 0.08, 0.20),
+                frame_edge: Color::srgb(0.35, 0.20, 0.45),
+                board_bg: Color::srgb(0.78, 0.68, 0.85),
+                line_color: Color::srgb(0.25, 0.15, 0.32),
+                river_color: Color::srgba(0.25, 0.15, 0.32, 0.50),
+                disc_face: Color::srgb(0.98, 0.95, 0.98),
+                red_ink: Color::srgb(0.82, 0.15, 0.12),
+                black_ink: Color::srgb(0.12, 0.08, 0.15),
+                disc_border: Color::srgba(0.60, 0.50, 0.70, 0.20),
+            },
+            ThemeId::Midnight => Palette {
+                frame_dark: Color::srgb(0.05, 0.08, 0.15),
+                frame_edge: Color::srgb(0.12, 0.18, 0.32),
+                board_bg: Color::srgb(0.18, 0.25, 0.42),
+                line_color: Color::srgb(0.75, 0.80, 0.90),
+                river_color: Color::srgba(0.75, 0.80, 0.90, 0.55),
+                disc_face: Color::srgb(0.95, 0.96, 0.98),
+                red_ink: Color::srgb(0.88, 0.20, 0.15),
+                black_ink: Color::srgb(0.08, 0.10, 0.15),
+                disc_border: Color::srgba(0.80, 0.85, 0.95, 0.18),
             },
         }
     }

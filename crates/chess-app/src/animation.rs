@@ -340,3 +340,261 @@ pub fn teardown_animations(
         commands.entity(e).despawn();
     }
 }
+
+// ===== Check and Checkmate Animations =====
+
+/// Screen shake effect when king is in check.
+#[derive(Component)]
+pub struct CheckShake {
+    pub timer: Timer,
+    pub intensity: f32,
+}
+
+impl CheckShake {
+    pub fn new() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.3, TimerMode::Once),
+            intensity: 3.0,
+        }
+    }
+}
+
+/// Spawn a check shake effect on the camera.
+pub fn spawn_check_shake(commands: &mut Commands, camera_entity: Entity) {
+    commands.entity(camera_entity).insert(CheckShake::new());
+}
+
+/// Animate the check shake effect.
+pub fn animate_check_shake(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut shakes: Query<(Entity, &mut CheckShake, &mut Transform)>,
+) {
+    for (entity, mut shake, mut transform) in &mut shakes {
+        shake.timer.tick(time.delta());
+
+        if shake.timer.is_finished() {
+            // Reset position
+            transform.translation.x = transform.translation.x.round();
+            transform.translation.y = transform.translation.y.round();
+            commands.entity(entity).remove::<CheckShake>();
+        } else {
+            // Apply shake
+            let progress = shake.timer.fraction();
+            let decay = 1.0 - progress;
+            let offset_x = (time.elapsed_secs() * 50.0).sin() * shake.intensity * decay;
+            let offset_y = (time.elapsed_secs() * 60.0).cos() * shake.intensity * decay;
+
+            transform.translation.x += offset_x;
+            transform.translation.y += offset_y;
+        }
+    }
+}
+
+/// Particle effect for captures.
+#[derive(Component)]
+pub struct CaptureParticle {
+    pub timer: Timer,
+    pub velocity: Vec2,
+    pub start_pos: Vec2,
+}
+
+impl CaptureParticle {
+    pub fn new(pos: Vec2, angle: f32, seed: f32) -> Self {
+        let speed = 100.0 + seed * 50.0;
+        Self {
+            timer: Timer::from_seconds(0.5, TimerMode::Once),
+            velocity: Vec2::new(angle.cos() * speed, angle.sin() * speed),
+            start_pos: pos,
+        }
+    }
+}
+
+/// Spawn capture particles at the given position.
+pub fn spawn_capture_particles(commands: &mut Commands, pos: Vec2, color: Color) {
+    let particle_count = 8;
+    for i in 0..particle_count {
+        let angle = (i as f32 / particle_count as f32) * std::f32::consts::TAU;
+        let seed = (i as f32) / (particle_count as f32);
+        commands.spawn((
+            Sprite {
+                color,
+                custom_size: Some(Vec2::splat(8.0)),
+                ..default()
+            },
+            Transform::from_xyz(pos.x, pos.y, 15.0),
+            CaptureParticle::new(pos, angle, seed),
+        ));
+    }
+}
+
+/// Animate capture particles.
+pub fn animate_capture_particles(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut particles: Query<(Entity, &mut CaptureParticle, &mut Transform, &mut Sprite)>,
+) {
+    for (entity, mut particle, mut transform, mut sprite) in &mut particles {
+        particle.timer.tick(time.delta());
+
+        if particle.timer.is_finished() {
+            commands.entity(entity).despawn();
+        } else {
+            let progress = particle.timer.fraction();
+            let dt = time.delta_secs();
+
+            // Apply gravity and velocity
+            particle.velocity.y -= 300.0 * dt;
+
+            let new_x = transform.translation.x + particle.velocity.x * dt;
+            let new_y = transform.translation.y + particle.velocity.y * dt;
+
+            transform.translation.x = new_x;
+            transform.translation.y = new_y;
+
+            // Fade out and shrink
+            let alpha = 1.0 - progress;
+            let scale = 1.0 - progress * 0.5;
+            if let Color::Srgba(ref mut rgba) = sprite.color {
+                rgba.alpha = alpha;
+            }
+            transform.scale = Vec3::splat(scale);
+        }
+    }
+}
+
+/// Checkmate celebration effect.
+#[derive(Component)]
+pub struct CheckmateCelebration {
+    pub timer: Timer,
+}
+
+impl CheckmateCelebration {
+    pub fn new() -> Self {
+        Self {
+            timer: Timer::from_seconds(2.0, TimerMode::Once),
+        }
+    }
+}
+
+/// Spawn checkmate celebration particles.
+pub fn spawn_checkmate_celebration(commands: &mut Commands, board_center: Vec2) {
+    let colors = [
+        Color::srgb(1.0, 0.8, 0.2), // Gold
+        Color::srgb(1.0, 0.4, 0.2), // Orange
+        Color::srgb(1.0, 0.2, 0.3), // Red
+    ];
+
+    for i in 0..30 {
+        let color = colors[i % colors.len()];
+        let angle = (i as f32 / 30.0) * std::f32::consts::TAU;
+        let distance = 30.0 + (i as f32 * 3.7);
+        let pos = board_center + Vec2::new(angle.cos() * distance, angle.sin() * distance);
+
+        commands.spawn((
+            Sprite {
+                color,
+                custom_size: Some(Vec2::splat(12.0)),
+                ..default()
+            },
+            Transform::from_xyz(pos.x, pos.y, 20.0),
+            CheckmateCelebration::new(),
+        ));
+    }
+}
+
+/// Animate checkmate celebration.
+pub fn animate_checkmate_celebration(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut celebrations: Query<(
+        Entity,
+        &mut CheckmateCelebration,
+        &mut Transform,
+        &mut Sprite,
+    )>,
+) {
+    for (entity, mut celebration, mut transform, mut sprite) in &mut celebrations {
+        celebration.timer.tick(time.delta());
+
+        if celebration.timer.is_finished() {
+            commands.entity(entity).despawn();
+        } else {
+            let progress = celebration.timer.fraction();
+
+            // Float upward and spin
+            transform.translation.y += 30.0 * time.delta_secs();
+            transform.rotate_z(2.0 * time.delta_secs());
+
+            // Fade out
+            let alpha = 1.0 - progress;
+            if let Color::Srgba(ref mut rgba) = sprite.color {
+                rgba.alpha = alpha;
+            }
+
+            // Pulse scale
+            let scale = 1.0 + 0.2 * (progress * std::f32::consts::PI * 4.0).sin();
+            transform.scale = Vec3::splat(scale);
+        }
+    }
+}
+
+/// Update teardown to include new animation components.
+pub fn teardown_new_animations(
+    mut commands: Commands,
+    q: Query<
+        Entity,
+        Or<(
+            With<CheckShake>,
+            With<CaptureParticle>,
+            With<CheckmateCelebration>,
+        )>,
+    >,
+) {
+    for e in &q {
+        commands.entity(e).despawn();
+    }
+}
+
+// ===== Animation Trigger Systems =====
+
+/// Camera marker for check shake effect.
+#[derive(Component)]
+pub struct GameCamera;
+
+/// Consume the CHECK_THIS_FRAME flag and spawn screen shake on the camera.
+pub fn trigger_check_animation(mut commands: Commands, cameras: Query<Entity, With<GameCamera>>) {
+    if crate::moves::CHECK_THIS_FRAME.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        if let Ok(camera) = cameras.single() {
+            commands.entity(camera).insert(CheckShake::new());
+            bevy::log::info!("Check! Triggering screen shake.");
+        }
+    }
+}
+
+/// Consume the CAPTURE_THIS_FRAME flag and spawn particles at the capture square.
+pub fn trigger_capture_animation(
+    mut commands: Commands,
+    core: Res<crate::app_state::CoreGame>,
+    orient: Res<crate::app_state::BoardOrientation>,
+    theme: Res<crate::board_theme::BoardTheme>,
+) {
+    if crate::moves::CAPTURE_THIS_FRAME.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        if let Some((_, to)) = core.last_move {
+            let pos = crate::app_state::square_to_world(to, *orient);
+            // Use the theme's disc border color for particles
+            let color = theme.palette.disc_border;
+            crate::animation::spawn_capture_particles(&mut commands, pos, color);
+            bevy::log::info!("Capture! Spawning particles at {:?}.", to);
+        }
+    }
+}
+
+/// Consume the CHECKMATE_THIS_FRAME flag and spawn celebration particles.
+pub fn trigger_checkmate_animation(mut commands: Commands) {
+    if crate::moves::CHECKMATE_THIS_FRAME.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        // Spawn celebration at board center (0,0)
+        crate::animation::spawn_checkmate_celebration(&mut commands, Vec2::ZERO);
+        bevy::log::info!("Checkmate! Spawning celebration.");
+    }
+}

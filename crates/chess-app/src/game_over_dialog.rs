@@ -117,9 +117,13 @@ pub fn check_game_over(
     // Queue game-over sound effect (plays next frame since play_pending_sound
     // runs earlier in the chain — imperceptible 1-frame delay).
     let game_sound = match result {
-        GameResult::Win { winner, .. } => {
+        GameResult::Win { winner, reason } => {
             if winner == core.local_color {
-                crate::sound::MoveSound::GameWin
+                if matches!(reason, chess_core::WinReason::Checkmate) {
+                    crate::sound::MoveSound::Checkmate
+                } else {
+                    crate::sound::MoveSound::GameWin
+                }
             } else {
                 crate::sound::MoveSound::GameLose
             }

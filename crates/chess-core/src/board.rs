@@ -163,6 +163,44 @@ impl Board {
         self.legal_moves().contains(&mv)
     }
 
+    /// Fill a caller-provided buffer with all legal moves, avoiding heap
+    /// allocation in the hot path. The buffer is cleared before filling.
+    ///
+    /// This is the preferred API for search engines that call `legal_moves`
+    /// millions of times per second and want to reuse a single allocation.
+    pub fn legal_moves_into(&self, buf: &mut Vec<Move>) {
+        buf.clear();
+        let me = self.side_to_move;
+        let mut board = self.clone();
+        for mv in self.pseudo_legal_moves() {
+            let undo = board.make_move(mv);
+            let ok = !board.is_king_in_danger(me);
+            board.unmake_move(undo);
+            if ok {
+                buf.push(mv);
+            }
+        }
+    }
+
+    /// Fill a caller-provided buffer with all legal captures only.
+    /// Useful for quiescence search to avoid generating quiet moves.
+    pub fn legal_captures_into(&self, buf: &mut Vec<Move>) {
+        buf.clear();
+        let me = self.side_to_move;
+        let mut board = self.clone();
+        for mv in self.pseudo_legal_moves() {
+            if self.piece_at(mv.to).is_none() {
+                continue;
+            }
+            let undo = board.make_move(mv);
+            let ok = !board.is_king_in_danger(me);
+            board.unmake_move(undo);
+            if ok {
+                buf.push(mv);
+            }
+        }
+    }
+
     #[inline]
     fn add_if_not_friendly(&self, from: Square, to: Square, me: Color, out: &mut Vec<Move>) {
         match self.squares[to.index()] {
@@ -464,5 +502,111 @@ impl Board {
             s.push('\n');
         }
         s
+    }
+}
+
+#[cfg(test)]
+mod move_buffer_tests {
+    use super::*;
+
+    #[test]
+    fn legal_moves_into_matches_legal_moves() {
+        let board = Board::start_position();
+        let expected = board.legal_moves();
+
+        let mut buffer = Vec::new();
+        board.legal_moves_into(&mut buffer);
+
+        assert_eq!(buffer.len(), expected.len());
+        for mv in &expected {
+            assert!(buffer.contains(mv));
+        }
+    }
+
+    #[test]
+    fn legal_moves_into_clears_buffer() {
+        let board = Board::start_position();
+        let mut buffer = vec![
+            Move {
+                from: Square::from_index(0),
+                to: Square::from_index(1)
+            };
+            10
+        ];
+
+        board.legal_moves_into(&mut buffer);
+
+        // Buffer should be cleared and refilled with legal moves
+        assert_eq!(buffer.len(), 44); // Starting position has 44 legal moves
+    }
+
+    #[test]
+    fn legal_moves_into_reuses_buffer_capacity() {
+        let board = Board::start_position();
+        let mut buffer = Vec::with_capacity(100);
+
+        board.legal_moves_into(&mut buffer);
+        let capacity_after = buffer.capacity();
+
+        // Call again - should reuse capacity
+        board.legal_moves_into(&mut buffer);
+        assert_eq!(buffer.capacity(), capacity_after);
+    }
+
+    #[test]
+    fn legal_captures_into_filters_non_captures() {
+        let board = Board::start_position();
+
+        let mut all_moves = Vec::new();
+        board.legal_moves_into(&mut all_moves);
+
+        let mut captures = Vec::new();
+        board.legal_captures_into(&mut captures);
+
+        // All captures should be in all_moves
+        for cap in &captures {
+            assert!(all_moves.contains(cap));
+        }
+
+        // All captures should target occupied squares
+        for cap in &captures {
+            assert!(board.piece_at(cap.to).is_some());
+        }
+    }
+
+    #[test]
+    fn legal_captures_into_finds_two_in_start_position() {
+        let board = Board::start_position();
+
+        let mut captures = Vec::new();
+        board.legal_captures_into(&mut captures);
+
+        // Starting position has 2 legal captures: cannons can capture horses
+        // This matches legal_moves() filtered for occupied destinations
+        let expected_count = board
+            .legal_moves()
+            .iter()
+            .filter(|mv| board.piece_at(mv.to).is_some())
+            .count();
+        assert_eq!(captures.len(), expected_count);
+        assert_eq!(captures.len(), 2); // Cannons capture horses on back rank
+    }
+
+    #[test]
+    fn legal_captures_into_finds_captures() {
+        // Set up a position with a capture available
+        let fen = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
+        let board = Board::from_fen(fen).unwrap();
+
+        let mut captures = Vec::new();
+        board.legal_captures_into(&mut captures);
+
+        // Should find some captures (cannons can capture pawns)
+        assert!(captures.len() > 0);
+
+        // All should be actual captures
+        for cap in &captures {
+            assert!(board.piece_at(cap.to).is_some());
+        }
     }
 }

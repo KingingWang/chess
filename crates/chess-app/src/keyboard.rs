@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use crate::animation::{AnimSpeedSetting, AnimationPlaying};
 use crate::app_state::{AppState, BoardOrientation, CoreGame, GameMode, Selection, UiFonts};
 use crate::board_theme::BoardTheme;
-use crate::board_view::{CoordLabel, RenderDirty, ShowCoordinates};
+use crate::board_view::{CoordLabel, CoordinateStyle, RenderDirty, ShowCoordinates};
 use crate::history_view::HistoryView;
 use crate::sound::SoundVolume;
 
@@ -137,9 +137,12 @@ pub fn keyboard_shortcuts(
             crate::board_theme::ThemeId::Paper => 3,
             crate::board_theme::ThemeId::Rosewood => 4,
             crate::board_theme::ThemeId::Jade => 5,
+            crate::board_theme::ThemeId::Bamboo => 6,
+            crate::board_theme::ThemeId::Imperial => 7,
+            crate::board_theme::ThemeId::Midnight => 8,
         };
         let label = format!(
-            "{} 主题: {} ({}/5)",
+            "{} 主题: {} ({}/8)",
             theme.id.emoji(),
             theme.id.label(),
             theme_num

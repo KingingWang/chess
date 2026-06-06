@@ -10,11 +10,12 @@ name = "chess"
 path = "src/main.rs"
 
 [dependencies]
+arboard = "3.2"
 chess-core = { workspace = true, features = ["serde"] }
 chess-ai = { workspace = true }
 chess-net = { workspace = true }
 tokio = { workspace = true }
-crossbeam-channel = "0.5"
+crossbeam-channel = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

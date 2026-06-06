@@ -9,6 +9,7 @@
 //! 4. **King safety** — bonus for having advisors/elephants protecting the king.
 //! 5. **Pawn structure** — connected pawns, advanced pawns, river-crossing bonuses.
 
+use crate::endgame;
 use chess_core::square;
 use chess_core::{Board, Color, Piece, PieceKind, Square};
 
@@ -393,6 +394,11 @@ pub fn evaluate(board: &Board, side: Color) -> i32 {
     // Endgame adjustments.
     if is_endgame(board) {
         red += endgame_king_distance(board);
+
+        // Add endgame knowledge bonus for known theoretical positions
+        if let Some(endgame_bonus) = endgame::endgame_eval(board) {
+            red += endgame_bonus;
+        }
     }
 
     match side {

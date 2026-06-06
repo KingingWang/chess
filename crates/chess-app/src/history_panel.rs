@@ -415,3 +415,235 @@ pub fn history_entry_hover(
         }
     }
 }
+
+// ===== Move Annotation System =====
+
+/// Component to store user annotations on moves.
+#[derive(Component, Debug, Clone)]
+pub struct MoveAnnotation {
+    pub ply: usize,
+    pub symbol: Option<MoveSymbol>,
+    pub comment: Option<String>,
+}
+
+/// Move quality symbols.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveSymbol {
+    Good,        // !
+    Bad,         // ?
+    Brilliant,   // !!
+    Blunder,     // ??
+    Interesting, // !?
+    Dubious,     // ?!
+}
+
+impl MoveSymbol {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MoveSymbol::Good => "!",
+            MoveSymbol::Bad => "?",
+            MoveSymbol::Brilliant => "!!",
+            MoveSymbol::Blunder => "??",
+            MoveSymbol::Interesting => "!?",
+            MoveSymbol::Dubious => "?!",
+        }
+    }
+
+    pub fn color(&self) -> Color {
+        match self {
+            MoveSymbol::Good => Color::srgb(0.3, 0.9, 0.3), // Green
+            MoveSymbol::Bad => Color::srgb(0.9, 0.3, 0.3),  // Red
+            MoveSymbol::Brilliant => Color::srgb(0.2, 0.8, 1.0), // Cyan
+            MoveSymbol::Blunder => Color::srgb(1.0, 0.2, 0.2), // Bright red
+            MoveSymbol::Interesting => Color::srgb(0.9, 0.8, 0.2), // Yellow
+            MoveSymbol::Dubious => Color::srgb(0.9, 0.6, 0.2), // Orange
+        }
+    }
+}
+
+/// Resource to store all move annotations for the current game.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct MoveAnnotations {
+    pub annotations: Vec<MoveAnnotation>,
+}
+
+impl MoveAnnotations {
+    /// Add or update an annotation for a specific ply.
+    pub fn annotate(&mut self, ply: usize, symbol: Option<MoveSymbol>, comment: Option<String>) {
+        // Remove existing annotation for this ply
+        self.annotations.retain(|a| a.ply != ply);
+
+        // Add new annotation if there's something to annotate
+        if symbol.is_some() || comment.is_some() {
+            self.annotations.push(MoveAnnotation {
+                ply,
+                symbol,
+                comment,
+            });
+        }
+    }
+
+    /// Get annotation for a specific ply.
+    pub fn get(&self, ply: usize) -> Option<&MoveAnnotation> {
+        self.annotations.iter().find(|a| a.ply == ply)
+    }
+
+    /// Clear all annotations.
+    pub fn clear(&mut self) {
+        self.annotations.clear();
+    }
+
+    /// Export annotations as text.
+    pub fn export(&self, core: &CoreGame) -> String {
+        let mut output = String::new();
+        for annotation in &self.annotations {
+            if let Some(board_before) = core.game.board_at_ply(annotation.ply) {
+                let entry = &core.game.history()[annotation.ply];
+                let move_notation = chess_core::move_to_chinese(entry.mv(), &board_before);
+                let move_num = annotation.ply / 2 + 1;
+                let side = if annotation.ply % 2 == 0 {
+                    "红"
+                } else {
+                    "黑"
+                };
+
+                output.push_str(&format!("{}.{} {}", move_num, side, move_notation));
+
+                if let Some(symbol) = annotation.symbol {
+                    output.push_str(&format!(" {}", symbol.as_str()));
+                }
+
+                if let Some(comment) = &annotation.comment {
+                    output.push_str(&format!(" {{{}}}", comment));
+                }
+
+                output.push('\n');
+            }
+        }
+        output
+    }
+}
+
+/// Keyboard shortcut to add annotation to the last move.
+/// Press ! for good, ? for bad, etc.
+pub fn handle_annotation_shortcuts(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut annotations: ResMut<MoveAnnotations>,
+    core: Res<CoreGame>,
+    mut commands: Commands,
+    fonts: Res<UiFonts>,
+) {
+    if core.game.history().is_empty() {
+        return;
+    }
+
+    let last_ply = core.game.history().len() - 1;
+
+    // Shift+1 = !, Shift+2 = @, etc. We'll use number keys with Ctrl
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+
+    if !ctrl {
+        return;
+    }
+
+    let symbol = if keys.just_pressed(KeyCode::Digit1) {
+        Some(MoveSymbol::Good)
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        Some(MoveSymbol::Bad)
+    } else if keys.just_pressed(KeyCode::Digit3) {
+        Some(MoveSymbol::Brilliant)
+    } else if keys.just_pressed(KeyCode::Digit4) {
+        Some(MoveSymbol::Blunder)
+    } else if keys.just_pressed(KeyCode::Digit5) {
+        Some(MoveSymbol::Interesting)
+    } else if keys.just_pressed(KeyCode::Digit6) {
+        Some(MoveSymbol::Dubious)
+    } else if keys.just_pressed(KeyCode::Digit0) {
+        // Clear annotation
+        annotations.annotate(last_ply, None, None);
+        crate::toast::spawn_toast(&mut commands, &fonts, "已清除标注");
+        return;
+    } else {
+        None
+    };
+
+    if let Some(sym) = symbol {
+        annotations.annotate(last_ply, Some(sym), None);
+        crate::toast::spawn_toast(
+            &mut commands,
+            &fonts,
+            &format!("已添加标注: {}", sym.as_str()),
+        );
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+
+    #[test]
+    fn test_move_symbol_as_str() {
+        assert_eq!(MoveSymbol::Good.as_str(), "!");
+        assert_eq!(MoveSymbol::Bad.as_str(), "?");
+        assert_eq!(MoveSymbol::Brilliant.as_str(), "!!");
+        assert_eq!(MoveSymbol::Blunder.as_str(), "??");
+        assert_eq!(MoveSymbol::Interesting.as_str(), "!?");
+        assert_eq!(MoveSymbol::Dubious.as_str(), "?!");
+    }
+
+    #[test]
+    fn test_annotations_add_and_get() {
+        let mut annotations = MoveAnnotations::default();
+
+        annotations.annotate(0, Some(MoveSymbol::Good), Some("Great opening".to_string()));
+
+        let ann = annotations.get(0).unwrap();
+        assert_eq!(ann.ply, 0);
+        assert_eq!(ann.symbol, Some(MoveSymbol::Good));
+        assert_eq!(ann.comment, Some("Great opening".to_string()));
+    }
+
+    #[test]
+    fn test_annotations_update() {
+        let mut annotations = MoveAnnotations::default();
+
+        annotations.annotate(0, Some(MoveSymbol::Good), None);
+        annotations.annotate(
+            0,
+            Some(MoveSymbol::Bad),
+            Some("Changed my mind".to_string()),
+        );
+
+        let ann = annotations.get(0).unwrap();
+        assert_eq!(ann.symbol, Some(MoveSymbol::Bad));
+        assert_eq!(ann.comment, Some("Changed my mind".to_string()));
+        assert_eq!(annotations.annotations.len(), 1); // Should only have one annotation
+    }
+
+    #[test]
+    fn test_annotations_clear() {
+        let mut annotations = MoveAnnotations::default();
+
+        annotations.annotate(0, Some(MoveSymbol::Good), None);
+        annotations.annotate(1, Some(MoveSymbol::Bad), None);
+
+        annotations.clear();
+
+        assert_eq!(annotations.annotations.len(), 0);
+    }
+
+    #[test]
+    fn test_annotations_remove_specific() {
+        let mut annotations = MoveAnnotations::default();
+
+        annotations.annotate(0, Some(MoveSymbol::Good), None);
+        annotations.annotate(1, Some(MoveSymbol::Bad), None);
+
+        // Remove annotation by setting to None
+        annotations.annotate(0, None, None);
+
+        assert_eq!(annotations.annotations.len(), 1);
+        assert!(annotations.get(0).is_none());
+        assert!(annotations.get(1).is_some());
+    }
+}

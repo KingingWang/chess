@@ -32,6 +32,36 @@ impl Default for ShowCoordinates {
     }
 }
 
+/// Coordinate display style.
+#[derive(
+    Resource, Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
+)]
+pub enum CoordinateStyle {
+    /// Traditional Xiangqi notation (Chinese numerals for Red, Arabic for Black).
+    #[default]
+    Traditional,
+    /// Algebraic notation (a-i for files, 0-9 for ranks).
+    Algebraic,
+}
+
+impl CoordinateStyle {
+    /// Cycle to next style.
+    pub fn next(self) -> Self {
+        match self {
+            CoordinateStyle::Traditional => CoordinateStyle::Algebraic,
+            CoordinateStyle::Algebraic => CoordinateStyle::Traditional,
+        }
+    }
+
+    /// Human-readable label.
+    pub fn label(self) -> &'static str {
+        match self {
+            CoordinateStyle::Traditional => "传统",
+            CoordinateStyle::Algebraic => "代数",
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct BoardLine;
 
@@ -144,7 +174,12 @@ fn spawn_star(
 }
 
 /// Spawn the board background, lacquer frame, grid, river text, and star marks.
-pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>, theme: Res<BoardTheme>) {
+pub fn setup_board(
+    mut commands: Commands,
+    fonts: Res<UiFonts>,
+    theme: Res<BoardTheme>,
+    coord_style: Res<CoordinateStyle>,
+) {
     let w = 8.0 * CELL;
     let h = 9.0 * CELL;
 
@@ -377,14 +412,30 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>, theme: Res<Board
     ));
 
     // File labels along bottom and top edges.
-    let red_files = ['九', '八', '七', '六', '五', '四', '三', '二', '一'];
-    let black_files = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    let coord_style = *coord_style;
     let label_offset = CELL * 0.6;
 
+    // File labels (top and bottom)
     for f in 0..9u8 {
         let x = (f as f32 - 4.0) * CELL;
+
+        let (bottom_label, top_label) = match coord_style {
+            CoordinateStyle::Traditional => {
+                let red_files = ['九', '八', '七', '六', '五', '四', '三', '二', '一'];
+                let black_files = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+                (
+                    red_files[f as usize].to_string(),
+                    black_files[f as usize].to_string(),
+                )
+            }
+            CoordinateStyle::Algebraic => {
+                let files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+                (files[f as usize].to_string(), files[f as usize].to_string())
+            }
+        };
+
         commands.spawn((
-            Text2d::new(red_files[f as usize].to_string()),
+            Text2d::new(bottom_label),
             TextFont {
                 font: fonts.regular.clone(),
                 font_size: 16.0,
@@ -396,7 +447,7 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>, theme: Res<Board
             CoordLabel,
         ));
         commands.spawn((
-            Text2d::new(black_files[f as usize].to_string()),
+            Text2d::new(top_label),
             TextFont {
                 font: fonts.regular.clone(),
                 font_size: 16.0,
@@ -409,12 +460,17 @@ pub fn setup_board(mut commands: Commands, fonts: Res<UiFonts>, theme: Res<Board
         ));
     }
 
-    // Rank labels along the left edge (0-9).
-    let rank_labels = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    // Rank labels along the left edge
     for r in 0..10u8 {
         let y = (r as f32 - 4.5) * CELL;
+
+        let rank_label = match coord_style {
+            CoordinateStyle::Traditional => r.to_string(),
+            CoordinateStyle::Algebraic => r.to_string(),
+        };
+
         commands.spawn((
-            Text2d::new(rank_labels[r as usize].to_string()),
+            Text2d::new(rank_label),
             TextFont {
                 font: fonts.regular.clone(),
                 font_size: 16.0,

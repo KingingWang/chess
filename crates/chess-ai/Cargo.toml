@@ -8,5 +8,6 @@ license.workspace = true
 chess-core = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+crossbeam-channel = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

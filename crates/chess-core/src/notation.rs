@@ -328,3 +328,203 @@ mod tests {
         assert_eq!(notation, "相七进九", "got: {notation}");
     }
 }
+
+/// Convert a move to algebraic notation (international format).
+///
+/// Format: Piece + FromFile + Action + Destination
+/// - Pieces: K (King), R (Chariot), C (Cannon), H (Horse), E (Elephant), A (Advisor), P (Pawn)
+/// - Files: 1-9 (from each side's perspective, right-to-left)
+/// - Actions: + (advance), - (retreat), = (traverse/horizontal)
+///
+/// Examples:
+/// - C2=5 (Cannon from file 2 traverses to file 5)
+/// - H8+7 (Horse from file 8 advances to file 7)
+/// - R1+1 (Chariot from file 1 advances 1 rank)
+pub fn move_to_algebraic(mv: Move, board_before: &Board) -> String {
+    let piece = board_before
+        .piece_at(mv.from)
+        .expect("move_to_algebraic: no piece at from square");
+    let color = piece.color;
+    let kind = piece.kind;
+
+    let mut result = String::with_capacity(6);
+
+    // Piece letter
+    result.push(algebraic_piece_letter(kind));
+
+    // Check for disambiguation
+    let needs_disambiguation = has_same_piece_on_file(board_before, mv.from, piece);
+
+    if needs_disambiguation {
+        let prefix = algebraic_disambiguation(board_before, mv.from, piece);
+        result.push(prefix);
+    } else {
+        // From file number
+        let from_file = file_to_algebraic(mv.from.file(), color);
+        result.push(from_file);
+    }
+
+    // Action and destination
+    let from_rank = mv.from.rank() as i8;
+    let to_rank = mv.to.rank() as i8;
+    let from_file = mv.from.file();
+    let to_file = mv.to.file();
+
+    let forward = match color {
+        Color::Red => 1i8,
+        Color::Black => -1i8,
+    };
+
+    if from_rank == to_rank {
+        // Horizontal move → =
+        result.push('=');
+        result.push(file_to_algebraic(to_file, color));
+    } else {
+        // Vertical or diagonal move
+        let rank_diff = (to_rank - from_rank) * forward;
+        let action = if rank_diff > 0 { '+' } else { '-' };
+        result.push(action);
+
+        // For line pieces: rank distance
+        // For diagonal pieces: destination file
+        if is_line_piece(kind) && from_file == to_file {
+            let distance = rank_diff.unsigned_abs();
+            result.push_str(&distance.to_string());
+        } else {
+            result.push(file_to_algebraic(to_file, color));
+        }
+    }
+
+    result
+}
+
+/// Get algebraic piece letter.
+fn algebraic_piece_letter(kind: PieceKind) -> char {
+    match kind {
+        PieceKind::King => 'K',
+        PieceKind::Chariot => 'R',
+        PieceKind::Cannon => 'C',
+        PieceKind::Horse => 'H',
+        PieceKind::Elephant => 'E',
+        PieceKind::Advisor => 'A',
+        PieceKind::Pawn => 'P',
+    }
+}
+
+/// Convert file number to algebraic notation (1-9).
+fn file_to_algebraic(file: u8, color: Color) -> char {
+    let num = match color {
+        Color::Red => 9 - file,   // file 0→9, file 8→1
+        Color::Black => file + 1, // file 0→1, file 8→9
+    };
+    char::from_digit(num as u32, 10).unwrap_or('?')
+}
+
+/// Algebraic disambiguation: + (front) or - (rear).
+fn algebraic_disambiguation(board: &Board, sq: Square, piece: Piece) -> char {
+    let file = sq.file();
+    let my_rank = sq.rank();
+
+    for (other_sq, other_piece) in board.pieces() {
+        if other_sq == sq {
+            continue;
+        }
+        if other_piece == piece && other_sq.file() == file {
+            let other_rank = other_sq.rank();
+            let is_front = match piece.color {
+                Color::Red => my_rank > other_rank,
+                Color::Black => my_rank < other_rank,
+            };
+            return if is_front { '+' } else { '-' };
+        }
+    }
+    '+'
+}
+
+#[cfg(test)]
+mod algebraic_tests {
+    use super::*;
+    use crate::{Board, Piece, PieceKind, Square};
+
+    #[test]
+    fn cannon_center_opening_algebraic() {
+        let b = Board::start_position();
+        let mv = Move::from_iccs("h2e2").unwrap();
+        let notation = move_to_algebraic(mv, &b);
+        assert_eq!(notation, "C2=5", "got: {notation}");
+    }
+
+    #[test]
+    fn horse_opening_algebraic() {
+        let b = Board::start_position();
+        let mv = Move::from_iccs("b0c2").unwrap();
+        let notation = move_to_algebraic(mv, &b);
+        assert_eq!(notation, "H8+7", "got: {notation}");
+    }
+
+    #[test]
+    fn chariot_advance_algebraic() {
+        let mut b = Board::empty();
+        b.set_piece(
+            Square::new(0, 0).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::Chariot)),
+        );
+        b.set_piece(
+            Square::new(4, 0).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::King)),
+        );
+        b.set_piece(
+            Square::new(4, 9).unwrap(),
+            Some(Piece::new(Color::Black, PieceKind::King)),
+        );
+        b.set_side_to_move(Color::Red);
+
+        let mv = Move::new(Square::new(0, 0).unwrap(), Square::new(0, 1).unwrap());
+        let notation = move_to_algebraic(mv, &b);
+        assert_eq!(notation, "R9+1", "got: {notation}");
+    }
+
+    #[test]
+    fn chariot_retreat_algebraic() {
+        let mut b = Board::empty();
+        b.set_piece(
+            Square::new(0, 5).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::Chariot)),
+        );
+        b.set_piece(
+            Square::new(4, 0).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::King)),
+        );
+        b.set_piece(
+            Square::new(4, 9).unwrap(),
+            Some(Piece::new(Color::Black, PieceKind::King)),
+        );
+        b.set_side_to_move(Color::Red);
+
+        let mv = Move::new(Square::new(0, 5).unwrap(), Square::new(0, 3).unwrap());
+        let notation = move_to_algebraic(mv, &b);
+        assert_eq!(notation, "R9-2", "got: {notation}");
+    }
+
+    #[test]
+    fn pawn_forward_algebraic() {
+        let mut b = Board::empty();
+        b.set_piece(
+            Square::new(4, 3).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::Pawn)),
+        );
+        b.set_piece(
+            Square::new(4, 0).unwrap(),
+            Some(Piece::new(Color::Red, PieceKind::King)),
+        );
+        b.set_piece(
+            Square::new(4, 9).unwrap(),
+            Some(Piece::new(Color::Black, PieceKind::King)),
+        );
+        b.set_side_to_move(Color::Red);
+
+        let mv = Move::new(Square::new(4, 3).unwrap(), Square::new(4, 4).unwrap());
+        let notation = move_to_algebraic(mv, &b);
+        assert_eq!(notation, "P5+1", "got: {notation}");
+    }
+}
