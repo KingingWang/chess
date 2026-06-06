@@ -139,6 +139,22 @@ impl CoreGame {
         self.game = Game::new();
         self.last_move = None;
     }
+
+    /// Full reset of all network/session fields. Called on return to menu so
+    /// that a subsequent local or AI game does not inherit stale `awaiting_peer`,
+    /// `connected`, or `peer_disconnected` flags from a previous networked
+    /// session (which would cause the HUD to show "正在连接" indefinitely).
+    pub fn reset_session(&mut self) {
+        self.game = Game::new();
+        self.mode = GameMode::LocalPvp;
+        self.local_color = ChessColor::Red;
+        self.draw_offer_from_peer = false;
+        self.room_code = None;
+        self.awaiting_peer = false;
+        self.connected = false;
+        self.peer_disconnected = false;
+        self.last_move = None;
+    }
 }
 
 /// Currently selected source square (for click-to-move).

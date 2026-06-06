@@ -96,6 +96,11 @@ fn reset_board_orientation(mut orient: ResMut<BoardOrientation>) {
     *orient = BoardOrientation::Red;
 }
 
+/// Reset network/session state on return to menu so the next game starts clean.
+fn reset_core_session(mut core: ResMut<app_state::CoreGame>) {
+    core.reset_session();
+}
+
 /// A single persistent 2D camera that renders both the menu UI and the board.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
@@ -258,6 +263,7 @@ fn main() {
         .add_systems(
             OnExit(AppState::InGame),
             (
+                reset_core_session,
                 board_view::teardown_board,
                 net_bridge::teardown_net,
                 ui::teardown_hud,
