@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::app_state::{CoreGame, GameMode, UiFonts};
+use crate::app_state::{CoreGame, GameMode};
 
 /// Auto-save interval in seconds.
 const AUTOSAVE_INTERVAL_SECS: f32 = 30.0;
@@ -206,11 +206,8 @@ pub fn periodic_autosave(time: Res<Time>, core: Res<CoreGame>, mut autosave: Res
     autosave.time_since_save += time.delta_secs();
 
     // Save every AUTOSAVE_INTERVAL_SECS or when moves change
-    if autosave.time_since_save >= AUTOSAVE_INTERVAL_SECS || move_count != autosave.last_move_count
-    {
-        if autosave.time_since_save >= AUTOSAVE_INTERVAL_SECS {
-            let _ = autosave.save_game(&core);
-        }
+    if autosave.time_since_save >= AUTOSAVE_INTERVAL_SECS {
+        let _ = autosave.save_game(&core);
     }
 }
 

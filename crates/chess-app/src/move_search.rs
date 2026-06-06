@@ -2,23 +2,12 @@
 
 use bevy::prelude::*;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct MoveSearch {
     pub active: bool,
     pub query: String,
     pub results: Vec<usize>,
     pub current_result: usize,
-}
-
-impl Default for MoveSearch {
-    fn default() -> Self {
-        Self {
-            active: false,
-            query: String::new(),
-            results: Vec::new(),
-            current_result: 0,
-        }
-    }
 }
 
 impl MoveSearch {

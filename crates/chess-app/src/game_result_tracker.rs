@@ -9,21 +9,11 @@ pub enum GameResult {
     Draw,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameResultTracker {
     pub results: Vec<GameResult>,
     pub current_streak: i32,
     pub longest_streak: i32,
-}
-
-impl Default for GameResultTracker {
-    fn default() -> Self {
-        Self {
-            results: Vec::new(),
-            current_streak: 0,
-            longest_streak: 0,
-        }
-    }
 }
 
 impl GameResultTracker {

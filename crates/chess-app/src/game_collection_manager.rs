@@ -11,19 +11,10 @@ pub struct GameCollection {
     pub tags: Vec<String>,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameCollectionManager {
     pub collections: HashMap<String, GameCollection>,
     pub visible: bool,
-}
-
-impl Default for GameCollectionManager {
-    fn default() -> Self {
-        Self {
-            collections: HashMap::new(),
-            visible: false,
-        }
-    }
 }
 
 impl GameCollectionManager {

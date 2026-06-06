@@ -11,9 +11,10 @@ use crate::ai_bridge::SearchInfoResource;
 use crate::app_state::{CoreGame, UiFonts};
 
 /// Hint level settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HintLevel {
     /// No hints shown.
+    #[default]
     Off,
     /// Only highlight movable pieces.
     MovablePieces,
@@ -46,12 +47,6 @@ impl HintLevel {
             Self::BestMove => Self::All,
             Self::All => Self::Off,
         }
-    }
-}
-
-impl Default for HintLevel {
-    fn default() -> Self {
-        Self::Off
     }
 }
 
@@ -139,7 +134,7 @@ pub fn update_move_hints(
 }
 
 /// System to track time for auto-hints.
-pub fn track_hint_time(time: Res<Time>, mut hint: ResMut<MoveHint>, core: Res<CoreGame>) {
+pub fn track_hint_time(time: Res<Time>, mut hint: ResMut<MoveHint>, _core: Res<CoreGame>) {
     if !hint.auto_hint || hint.level == HintLevel::Off {
         return;
     }
@@ -147,10 +142,8 @@ pub fn track_hint_time(time: Res<Time>, mut hint: ResMut<MoveHint>, core: Res<Co
     hint.time_since_move += time.delta_secs();
 
     // If enough time has passed, upgrade hint level temporarily
-    if hint.time_since_move >= hint.auto_hint_delay {
-        if hint.level == HintLevel::MovablePieces {
-            hint.level = HintLevel::LegalMoves;
-        }
+    if hint.time_since_move >= hint.auto_hint_delay && hint.level == HintLevel::MovablePieces {
+        hint.level = HintLevel::LegalMoves;
     }
 }
 

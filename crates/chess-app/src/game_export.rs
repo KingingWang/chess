@@ -76,7 +76,7 @@ impl GameExport {
         pgn.push_str(&format!("[Date \"{}\"]\n", "2026.06.06"));
         pgn.push_str("[White \"Red\"]\n");
         pgn.push_str("[Black \"Black\"]\n");
-        pgn.push_str("\n");
+        pgn.push('\n');
 
         // Add moves
         for (i, entry) in core.game.history().iter().enumerate() {
@@ -92,7 +92,7 @@ impl GameExport {
                 m.to.rank() + 1
             ));
         }
-        pgn.push_str("\n");
+        pgn.push('\n');
         pgn
     }
 

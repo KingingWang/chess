@@ -7,7 +7,7 @@ use chess_core::{Board, Game};
 use std::path::PathBuf;
 
 /// Resource managing position setup state.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct PositionSetup {
     /// Whether the setup dialog is visible.
     pub visible: bool,
@@ -19,18 +19,6 @@ pub struct PositionSetup {
     pub last_position: Option<Board>,
     /// Path to the last loaded PGN file.
     pub last_pgn_path: Option<PathBuf>,
-}
-
-impl Default for PositionSetup {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            fen_input: String::new(),
-            error_message: None,
-            last_position: None,
-            last_pgn_path: None,
-        }
-    }
 }
 
 impl PositionSetup {

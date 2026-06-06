@@ -2,8 +2,9 @@
 
 use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GamePhase {
+    #[default]
     Opening,
     Middlegame,
     Endgame,
@@ -25,12 +26,6 @@ impl GamePhase {
             11..=40 => Self::Middlegame,
             41.. => Self::Endgame,
         }
-    }
-}
-
-impl Default for GamePhase {
-    fn default() -> Self {
-        Self::Opening
     }
 }
 

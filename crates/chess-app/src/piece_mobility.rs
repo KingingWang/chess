@@ -3,19 +3,10 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct PieceMobility {
     pub enabled: bool,
     pub mobility: HashMap<(u8, u8), usize>,
-}
-
-impl Default for PieceMobility {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mobility: HashMap::new(),
-        }
-    }
 }
 
 impl PieceMobility {

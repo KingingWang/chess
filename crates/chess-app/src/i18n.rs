@@ -6,8 +6,9 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Supported languages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Language {
+    #[default]
     ChineseSimplified,
     ChineseTraditional,
     English,
@@ -31,12 +32,6 @@ impl Language {
             Self::English => Self::Japanese,
             Self::Japanese => Self::ChineseSimplified,
         }
-    }
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Self::ChineseSimplified
     }
 }
 

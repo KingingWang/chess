@@ -63,19 +63,20 @@ pub fn undo_redo_shortcuts(
     fonts: Res<crate::app_state::UiFonts>,
 ) {
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    if ctrl && keys.just_pressed(KeyCode::KeyZ) && !keys.pressed(KeyCode::ShiftLeft) {
-        if stack.can_undo() {
-            stack.undo();
-            crate::toast::spawn_toast(&mut commands, &fonts, "悔棋");
-        }
-    }
-    if ctrl && keys.just_pressed(KeyCode::KeyY)
-        || (ctrl && keys.pressed(KeyCode::ShiftLeft) && keys.just_pressed(KeyCode::KeyZ))
+    if ctrl
+        && keys.just_pressed(KeyCode::KeyZ)
+        && !keys.pressed(KeyCode::ShiftLeft)
+        && stack.can_undo()
     {
-        if stack.can_redo() {
-            stack.redo();
-            crate::toast::spawn_toast(&mut commands, &fonts, "重做");
-        }
+        stack.undo();
+        crate::toast::spawn_toast(&mut commands, &fonts, "悔棋");
+    }
+    if (ctrl && keys.just_pressed(KeyCode::KeyY)
+        || (ctrl && keys.pressed(KeyCode::ShiftLeft) && keys.just_pressed(KeyCode::KeyZ)))
+        && stack.can_redo()
+    {
+        stack.redo();
+        crate::toast::spawn_toast(&mut commands, &fonts, "重做");
     }
 }
 

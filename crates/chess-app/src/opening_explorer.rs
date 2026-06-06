@@ -69,9 +69,9 @@ impl OpeningDatabase {
             let move_stats = self
                 .positions
                 .entry(fen.clone())
-                .or_insert_with(HashMap::new)
+                .or_default()
                 .entry(mv)
-                .or_insert_with(MoveStats::default);
+                .or_default();
 
             move_stats.games_played += 1;
 
@@ -161,7 +161,7 @@ pub fn toggle_opening_explorer(
 }
 
 /// Spawn the opening explorer UI.
-fn spawn_opening_explorer_ui(commands: &mut Commands, db: &OpeningDatabase) {
+fn spawn_opening_explorer_ui(commands: &mut Commands, _db: &OpeningDatabase) {
     commands.spawn((
         Sprite {
             color: Color::srgba(0.0, 0.0, 0.0, 0.8),

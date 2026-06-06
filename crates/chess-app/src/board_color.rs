@@ -64,17 +64,9 @@ impl Default for BoardColors {
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct BoardColorResource {
     pub colors: BoardColors,
-}
-
-impl Default for BoardColorResource {
-    fn default() -> Self {
-        Self {
-            colors: BoardColors::default(),
-        }
-    }
 }
 
 pub fn cycle_board_colors(

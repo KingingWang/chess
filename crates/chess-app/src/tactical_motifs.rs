@@ -25,19 +25,10 @@ impl TacticalMotif {
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct TacticalMotifsDetector {
     pub enabled: bool,
     pub detected: Vec<TacticalMotif>,
-}
-
-impl Default for TacticalMotifsDetector {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            detected: Vec::new(),
-        }
-    }
 }
 
 pub fn toggle_motifs_detector(

@@ -21,7 +21,7 @@ pub struct DailyPuzzle {
 }
 
 /// Resource managing daily puzzle state.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Default)]
 pub struct DailyPuzzleChallenge {
     /// Current day's puzzle.
     pub current_puzzle: Option<DailyPuzzle>,
@@ -35,19 +35,6 @@ pub struct DailyPuzzleChallenge {
     pub longest_streak: u32,
     /// Last date a puzzle was completed.
     pub last_completed_date: Option<String>,
-}
-
-impl Default for DailyPuzzleChallenge {
-    fn default() -> Self {
-        Self {
-            current_puzzle: None,
-            completed_today: false,
-            total_completed: 0,
-            daily_streak: 0,
-            longest_streak: 0,
-            last_completed_date: None,
-        }
-    }
 }
 
 impl DailyPuzzleChallenge {

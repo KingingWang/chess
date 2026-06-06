@@ -7,7 +7,7 @@ use chess_core::Color as ChessColor;
 use std::collections::HashMap;
 
 /// Resource tracking game statistics.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameStatistics {
     /// Total wins as Red.
     pub wins_as_red: u32,
@@ -29,23 +29,6 @@ pub struct GameStatistics {
     pub longest_win_streak: u32,
     /// Current win streak.
     pub current_win_streak: u32,
-}
-
-impl Default for GameStatistics {
-    fn default() -> Self {
-        Self {
-            wins_as_red: 0,
-            wins_as_black: 0,
-            losses_as_red: 0,
-            losses_as_black: 0,
-            draws: 0,
-            total_moves: 0,
-            games_played: 0,
-            opening_moves: HashMap::new(),
-            longest_win_streak: 0,
-            current_win_streak: 0,
-        }
-    }
 }
 
 impl GameStatistics {

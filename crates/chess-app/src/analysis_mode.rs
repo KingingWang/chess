@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use chess_ai::SearchInfo;
 
 /// Resource tracking analysis mode state.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct AnalysisMode {
     /// Whether analysis mode is active.
     pub active: bool,
@@ -23,20 +23,6 @@ pub struct AnalysisMode {
     pub nodes: u64,
     /// Evaluation history for graphing.
     pub eval_history: Vec<i32>,
-}
-
-impl Default for AnalysisMode {
-    fn default() -> Self {
-        Self {
-            active: false,
-            eval_score: 0,
-            best_move: None,
-            principal_variation: Vec::new(),
-            depth: 0,
-            nodes: 0,
-            eval_history: Vec::new(),
-        }
-    }
 }
 
 impl AnalysisMode {
@@ -220,11 +206,9 @@ pub fn spawn_analysis_ui(
 /// Update analysis UI with current data.
 pub fn update_analysis_ui(
     analysis: Res<AnalysisMode>,
-    mut ui_query: Query<&mut Text, With<AnalysisUI>>,
+    _ui_query: Query<&mut Text, With<AnalysisUI>>,
 ) {
-    if !analysis.active {
-        return;
-    }
+    if !analysis.active {}
 
     // Update UI elements (simplified - in real implementation would update specific text nodes)
     // This is a placeholder for the actual UI update logic

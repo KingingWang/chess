@@ -7,11 +7,12 @@
 use bevy::prelude::*;
 
 /// Available piece display styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PieceStyle {
     /// Traditional Chinese characters (車馬炮).
     Traditional,
     /// Simplified Chinese characters (车马炮).
+    #[default]
     Simplified,
     /// Single-character abbreviations.
     Abbreviated,
@@ -120,12 +121,6 @@ impl PieceStyle {
             Self::Abbreviated => Self::International,
             Self::International => Self::Traditional,
         }
-    }
-}
-
-impl Default for PieceStyle {
-    fn default() -> Self {
-        Self::Simplified
     }
 }
 

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use crate::app_state::{CoreGame, UiFonts};
 
 /// Resource tracking the current detected opening.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct OpeningName {
     /// Current opening name (Chinese).
     pub name_cn: String,
@@ -18,17 +18,6 @@ pub struct OpeningName {
     pub moves_matched: usize,
     /// Whether we've already shown a toast for this opening.
     pub toast_shown: bool,
-}
-
-impl Default for OpeningName {
-    fn default() -> Self {
-        Self {
-            name_cn: String::new(),
-            name_en: String::new(),
-            moves_matched: 0,
-            toast_shown: false,
-        }
-    }
 }
 
 impl OpeningName {
@@ -157,12 +146,14 @@ pub fn detect_opening(
     let prev_matched = opening.moves_matched;
     opening.detect(&moves);
 
-    if opening.moves_matched > 0 && opening.moves_matched > prev_matched && !opening.toast_shown {
-        if opening.moves_matched >= 2 {
-            let msg = format!("开局: {}", opening.display());
-            crate::toast::spawn_toast(&mut commands, &fonts, &msg);
-            opening.toast_shown = true;
-        }
+    if opening.moves_matched > 0
+        && opening.moves_matched > prev_matched
+        && !opening.toast_shown
+        && opening.moves_matched >= 2
+    {
+        let msg = format!("开局: {}", opening.display());
+        crate::toast::spawn_toast(&mut commands, &fonts, &msg);
+        opening.toast_shown = true;
     }
 }
 

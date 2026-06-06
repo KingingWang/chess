@@ -16,6 +16,7 @@
 
 // Bevy query tuples legitimately exceed clippy's type-complexity threshold.
 #![allow(clippy::type_complexity)]
+#![allow(dead_code)]
 
 mod ai_bridge;
 mod animation;

@@ -8,9 +8,10 @@
 use bevy::prelude::*;
 
 /// Available sound themes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SoundTheme {
     /// Traditional wooden chess sounds.
+    #[default]
     Traditional,
     /// Clean digital/modern sounds.
     Modern,
@@ -40,24 +41,10 @@ impl SoundTheme {
     }
 }
 
-impl Default for SoundTheme {
-    fn default() -> Self {
-        Self::Traditional
-    }
-}
-
 /// Sound theme resource.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct SoundThemeResource {
     pub theme: SoundTheme,
-}
-
-impl Default for SoundThemeResource {
-    fn default() -> Self {
-        Self {
-            theme: SoundTheme::default(),
-        }
-    }
 }
 
 /// Cycle through sound themes with keyboard shortcut.

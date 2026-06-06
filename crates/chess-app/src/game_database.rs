@@ -96,7 +96,7 @@ impl GameRecord {
 }
 
 /// Resource managing the game database.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct GameDatabase {
     /// All saved games.
     pub games: Vec<GameRecord>,
@@ -104,16 +104,6 @@ pub struct GameDatabase {
     pub search_filter: Option<String>,
     /// Selected game index for viewing.
     pub selected_index: Option<usize>,
-}
-
-impl Default for GameDatabase {
-    fn default() -> Self {
-        Self {
-            games: Vec::new(),
-            search_filter: None,
-            selected_index: None,
-        }
-    }
 }
 
 impl GameDatabase {
@@ -313,7 +303,7 @@ pub fn toggle_game_database(
 }
 
 /// Spawn the game database UI.
-fn spawn_game_database_ui(commands: &mut Commands, db: &GameDatabase) {
+fn spawn_game_database_ui(commands: &mut Commands, _db: &GameDatabase) {
     commands.spawn((
         Sprite {
             color: Color::srgba(0.0, 0.0, 0.0, 0.8),

@@ -1,7 +1,6 @@
 //! Game bookmarks for saving interesting positions.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Bookmark {
@@ -11,19 +10,10 @@ pub struct Bookmark {
     pub timestamp: u64,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameBookmarks {
     pub bookmarks: Vec<Bookmark>,
     pub active: bool,
-}
-
-impl Default for GameBookmarks {
-    fn default() -> Self {
-        Self {
-            bookmarks: Vec::new(),
-            active: false,
-        }
-    }
 }
 
 impl GameBookmarks {

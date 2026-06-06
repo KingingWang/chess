@@ -55,7 +55,7 @@ impl MoveTimeDisplay {
         let move_idx = self.move_times.len() - 1;
 
         // Update totals
-        if move_idx % 2 == 0 {
+        if move_idx.is_multiple_of(2) {
             // Red's move
             self.red_total_time += time_secs;
             let red_moves = (move_idx / 2 + 1) as f32;
@@ -63,7 +63,7 @@ impl MoveTimeDisplay {
         } else {
             // Black's move
             self.black_total_time += time_secs;
-            let black_moves = ((move_idx + 1) / 2) as f32;
+            let black_moves = move_idx.div_ceil(2) as f32;
             self.black_avg_time = self.black_total_time / black_moves;
         }
 

@@ -8,11 +8,12 @@ use bevy::prelude::*;
 use crate::app_state::{CoreGame, UiFonts};
 
 /// Replay speed presets.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ReplaySpeed {
     /// 1 move per 2 seconds.
     Slow,
     /// 1 move per 1 second.
+    #[default]
     Normal,
     /// 1 move per 0.5 seconds.
     Fast,
@@ -59,12 +60,6 @@ impl ReplaySpeed {
             Self::Fast => Self::Normal,
             Self::VeryFast => Self::Fast,
         }
-    }
-}
-
-impl Default for ReplaySpeed {
-    fn default() -> Self {
-        Self::Normal
     }
 }
 

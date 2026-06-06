@@ -3,19 +3,10 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameTags {
     pub tags: HashSet<String>,
     pub current_game_tags: HashSet<String>,
-}
-
-impl Default for GameTags {
-    fn default() -> Self {
-        Self {
-            tags: HashSet::new(),
-            current_game_tags: HashSet::new(),
-        }
-    }
 }
 
 impl GameTags {

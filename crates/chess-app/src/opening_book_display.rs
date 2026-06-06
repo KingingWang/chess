@@ -29,7 +29,7 @@ impl Default for OpeningBookDisplay {
 impl OpeningBookDisplay {
     pub fn add_entry(&mut self, entry: OpeningBookEntry) {
         self.entries.push(entry);
-        self.entries.sort_by(|a, b| b.games.cmp(&a.games));
+        self.entries.sort_by_key(|b| std::cmp::Reverse(b.games));
         if self.entries.len() > self.max_entries {
             self.entries.truncate(self.max_entries);
         }

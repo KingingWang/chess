@@ -74,7 +74,7 @@ impl Puzzle {
 }
 
 /// Resource managing the puzzle mode state.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct PuzzleMode {
     /// Whether puzzle mode is active.
     pub active: bool,
@@ -88,19 +88,6 @@ pub struct PuzzleMode {
     pub solved_count: usize,
     /// Number of attempts made.
     pub attempt_count: usize,
-}
-
-impl Default for PuzzleMode {
-    fn default() -> Self {
-        Self {
-            active: false,
-            current_puzzle: None,
-            puzzles: Vec::new(),
-            puzzle_index: 0,
-            solved_count: 0,
-            attempt_count: 0,
-        }
-    }
 }
 
 impl PuzzleMode {

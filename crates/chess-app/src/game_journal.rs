@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Resource managing game journal entries.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameJournal {
     /// Map from move number to journal entry.
     pub entries: HashMap<usize, String>,
@@ -15,16 +15,6 @@ pub struct GameJournal {
     pub game_notes: String,
     /// Whether the journal panel is visible.
     pub visible: bool,
-}
-
-impl Default for GameJournal {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-            game_notes: String::new(),
-            visible: false,
-        }
-    }
 }
 
 impl GameJournal {

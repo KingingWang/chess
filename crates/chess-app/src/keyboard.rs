@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use crate::animation::{AnimSpeedSetting, AnimationPlaying};
 use crate::app_state::{AppState, BoardOrientation, CoreGame, GameMode, Selection, UiFonts};
 use crate::board_theme::BoardTheme;
-use crate::board_view::{CoordLabel, CoordinateStyle, RenderDirty, ShowCoordinates};
+use crate::board_view::{CoordLabel, RenderDirty, ShowCoordinates};
 use crate::history_view::HistoryView;
 use crate::sound::SoundVolume;
 

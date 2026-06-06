@@ -48,7 +48,7 @@ impl NotationValidator {
             self.last_error = Some("文件字符无效 (a-i)".to_string());
             return false;
         }
-        if !('0'..='9').contains(&chars[1]) {
+        if !chars[1].is_ascii_digit() {
             self.last_error = Some("横线数字无效 (0-9)".to_string());
             return false;
         }
@@ -56,7 +56,7 @@ impl NotationValidator {
             self.last_error = Some("目标文件无效".to_string());
             return false;
         }
-        if !('0'..='9').contains(&chars[3]) {
+        if !chars[3].is_ascii_digit() {
             self.last_error = Some("目标横线无效".to_string());
             return false;
         }

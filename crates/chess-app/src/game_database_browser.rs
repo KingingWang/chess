@@ -13,23 +13,12 @@ pub struct GameRecord {
     pub opening: String,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameDatabaseBrowser {
     pub visible: bool,
     pub games: Vec<GameRecord>,
     pub selected: Option<usize>,
     pub search_query: String,
-}
-
-impl Default for GameDatabaseBrowser {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            games: Vec::new(),
-            selected: None,
-            search_query: String::new(),
-        }
-    }
 }
 
 impl GameDatabaseBrowser {

@@ -10,9 +10,10 @@ use bevy::prelude::*;
 use crate::app_state::UiFonts;
 
 /// Coordinate display styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CoordStyle {
     /// Western algebraic: files a-i, ranks 0-9.
+    #[default]
     Western,
     /// Chinese numeric: files 一九 (right to left for Red), ranks 0-9.
     ChineseNumeric,
@@ -37,12 +38,6 @@ impl CoordStyle {
             Self::ChineseNumeric => Self::None,
             Self::None => Self::Western,
         }
-    }
-}
-
-impl Default for CoordStyle {
-    fn default() -> Self {
-        Self::Western
     }
 }
 

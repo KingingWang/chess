@@ -5,12 +5,13 @@
 
 use bevy::prelude::*;
 
-use crate::app_state::{CoreGame, UiFonts};
+use crate::app_state::UiFonts;
 
 /// Blindfold difficulty levels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlindfoldLevel {
     /// All pieces visible (normal mode).
+    #[default]
     None,
     /// Only opponent's pieces are hidden.
     OpponentHidden,
@@ -39,12 +40,6 @@ impl BlindfoldLevel {
             Self::FullBlindfold => Self::ExtremeBlindfold,
             Self::ExtremeBlindfold => Self::None,
         }
-    }
-}
-
-impl Default for BlindfoldLevel {
-    fn default() -> Self {
-        Self::None
     }
 }
 

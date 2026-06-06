@@ -51,7 +51,7 @@ pub enum GameOutcome {
 }
 
 /// Analytics resource.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct Analytics {
     /// Win/loss by time control.
     pub by_time_control: HashMap<TimeControlCategory, (u32, u32, u32)>, // (wins, losses, draws)
@@ -63,18 +63,6 @@ pub struct Analytics {
     pub opening_stats: HashMap<String, (u32, u32)>,
     /// Rating history (if applicable).
     pub rating_history: Vec<i32>,
-}
-
-impl Default for Analytics {
-    fn default() -> Self {
-        Self {
-            by_time_control: HashMap::new(),
-            game_lengths: Vec::new(),
-            avg_think_times: Vec::new(),
-            opening_stats: HashMap::new(),
-            rating_history: Vec::new(),
-        }
-    }
 }
 
 impl Analytics {
@@ -111,7 +99,7 @@ impl Analytics {
     pub fn overall_win_rate(&self) -> f32 {
         let mut total_wins = 0u32;
         let mut total_games = 0u32;
-        for (_, (w, l, d)) in &self.by_time_control {
+        for (w, l, d) in self.by_time_control.values() {
             total_wins += w;
             total_games += w + l + d;
         }

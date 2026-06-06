@@ -9,19 +9,10 @@ pub struct PgnGame {
     pub result: String,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GamePgnImport {
     pub last_imported: Option<PgnGame>,
     pub import_errors: Vec<String>,
-}
-
-impl Default for GamePgnImport {
-    fn default() -> Self {
-        Self {
-            last_imported: None,
-            import_errors: Vec::new(),
-        }
-    }
 }
 
 impl GamePgnImport {
@@ -70,7 +61,7 @@ impl GamePgnImport {
 
 pub fn import_pgn_shortcut(
     keys: Res<ButtonInput<KeyCode>>,
-    mut pgn: ResMut<GamePgnImport>,
+    _pgn: ResMut<GamePgnImport>,
     mut commands: Commands,
     fonts: Res<crate::app_state::UiFonts>,
 ) {

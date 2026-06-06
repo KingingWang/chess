@@ -161,7 +161,7 @@ impl EngineVsEngine {
 
     /// Get the current side to move.
     pub fn side_to_move(&self) -> ChessColor {
-        if self.move_number % 2 == 0 {
+        if self.move_number.is_multiple_of(2) {
             ChessColor::Red
         } else {
             ChessColor::Black

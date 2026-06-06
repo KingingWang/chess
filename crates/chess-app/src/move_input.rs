@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use chess_core::{Board, Move, Square};
 
 /// Resource managing move input state.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct MoveInput {
     /// Whether move input mode is active.
     pub active: bool,
@@ -16,17 +16,6 @@ pub struct MoveInput {
     pub error_message: Option<String>,
     /// Last successfully parsed move.
     pub last_move: Option<Move>,
-}
-
-impl Default for MoveInput {
-    fn default() -> Self {
-        Self {
-            active: false,
-            input_buffer: String::new(),
-            error_message: None,
-            last_move: None,
-        }
-    }
 }
 
 impl MoveInput {

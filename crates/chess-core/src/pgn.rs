@@ -344,11 +344,11 @@ impl AnnotatedGameRecord {
 
     /// Serialize with annotations.
     pub fn serialize(&self) -> String {
-        let mut s = self.base.serialize();
+        let s = self.base.serialize();
 
         // Insert annotations into the move text
         // This is a simplified version - full implementation would parse and re-serialize
-        for (i, ann) in self.annotations.iter().enumerate() {
+        for ann in self.annotations.iter() {
             if ann.nag.is_some() || ann.comment.is_some() || ann.symbol.is_some() {
                 // Find the move in the serialized text and add annotation
                 // For now, just append as a comment at the end
@@ -404,7 +404,7 @@ impl AnnotatedGameRecord {
 }
 
 /// Export game to standard PGN format with Chinese notation.
-pub fn export_to_chinese_pgn(game: &Game, record: &GameRecord) -> String {
+pub fn export_to_chinese_pgn(_game: &Game, record: &GameRecord) -> String {
     let mut s = String::new();
 
     // Header tags

@@ -5,9 +5,10 @@
 use bevy::prelude::*;
 
 /// Preset board sizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BoardSize {
     Small,
+    #[default]
     Medium,
     Large,
     ExtraLarge,
@@ -51,12 +52,6 @@ impl BoardSize {
             BoardSize::ExtraLarge => BoardSize::Large,
             BoardSize::Custom(size) => BoardSize::Custom(size.saturating_sub(100)),
         }
-    }
-}
-
-impl Default for BoardSize {
-    fn default() -> Self {
-        BoardSize::Medium
     }
 }
 

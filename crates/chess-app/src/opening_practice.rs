@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use crate::app_state::{CoreGame, UiFonts};
+use crate::app_state::UiFonts;
 
 /// A practice opening definition.
 #[derive(Debug, Clone)]

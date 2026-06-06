@@ -49,11 +49,12 @@ impl GameNotationConverter {
         }
         let chars: Vec<char> = move_str.chars().collect();
         format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             Self::file_to_chinese(chars[0]),
             chars[1],
             "→",
-            format!("{}{}", chars[2], chars[3])
+            chars[2],
+            chars[3]
         )
     }
 

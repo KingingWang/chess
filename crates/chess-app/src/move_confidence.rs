@@ -29,19 +29,10 @@ impl Confidence {
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct MoveConfidence {
     pub enabled: bool,
     pub confidences: Vec<(usize, Confidence)>,
-}
-
-impl Default for MoveConfidence {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            confidences: Vec::new(),
-        }
-    }
 }
 
 impl MoveConfidence {

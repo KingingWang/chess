@@ -1,25 +1,13 @@
 //! Manual position evaluator for learning.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct PositionEvaluator {
     pub active: bool,
     pub user_eval: i32,
     pub actual_eval: Option<i32>,
     pub history: Vec<(i32, i32)>,
-}
-
-impl Default for PositionEvaluator {
-    fn default() -> Self {
-        Self {
-            active: false,
-            user_eval: 0,
-            actual_eval: None,
-            history: Vec::new(),
-        }
-    }
 }
 
 impl PositionEvaluator {

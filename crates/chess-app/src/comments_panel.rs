@@ -3,21 +3,11 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct CommentsPanel {
     pub visible: bool,
     pub comments: HashMap<usize, String>,
     pub game_comment: String,
-}
-
-impl Default for CommentsPanel {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            comments: HashMap::new(),
-            game_comment: String::new(),
-        }
-    }
 }
 
 impl CommentsPanel {

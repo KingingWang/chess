@@ -2,9 +2,10 @@
 
 use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AiPersonality {
     Aggressive,
+    #[default]
     Balanced,
     Defensive,
     Tactical,
@@ -32,12 +33,6 @@ impl AiPersonality {
             Self::Positional => Self::Creative,
             Self::Creative => Self::Aggressive,
         }
-    }
-}
-
-impl Default for AiPersonality {
-    fn default() -> Self {
-        Self::Balanced
     }
 }
 

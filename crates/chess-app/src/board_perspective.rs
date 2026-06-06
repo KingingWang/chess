@@ -2,10 +2,11 @@
 
 use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Perspective {
     Red,
     Black,
+    #[default]
     Dynamic,
 }
 
@@ -23,12 +24,6 @@ impl Perspective {
             Self::Black => Self::Dynamic,
             Self::Dynamic => Self::Red,
         }
-    }
-}
-
-impl Default for Perspective {
-    fn default() -> Self {
-        Self::Dynamic
     }
 }
 

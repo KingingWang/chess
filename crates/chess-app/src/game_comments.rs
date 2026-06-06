@@ -2,19 +2,10 @@
 
 use bevy::prelude::*;
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameComments {
     pub comments: Vec<(usize, String)>,
     pub visible: bool,
-}
-
-impl Default for GameComments {
-    fn default() -> Self {
-        Self {
-            comments: Vec::new(),
-            visible: false,
-        }
-    }
 }
 
 impl GameComments {

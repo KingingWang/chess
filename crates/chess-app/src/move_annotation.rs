@@ -30,19 +30,10 @@ impl Annotation {
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct MoveAnnotations {
     pub annotations: HashMap<usize, Annotation>,
     pub comments: HashMap<usize, String>,
-}
-
-impl Default for MoveAnnotations {
-    fn default() -> Self {
-        Self {
-            annotations: HashMap::new(),
-            comments: HashMap::new(),
-        }
-    }
 }
 
 impl MoveAnnotations {
@@ -62,7 +53,7 @@ impl MoveAnnotations {
 
 pub fn toggle_annotations(
     keys: Res<ButtonInput<KeyCode>>,
-    mut ma: ResMut<MoveAnnotations>,
+    ma: ResMut<MoveAnnotations>,
     mut commands: Commands,
     fonts: Res<crate::app_state::UiFonts>,
 ) {

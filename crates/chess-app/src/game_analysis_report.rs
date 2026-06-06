@@ -13,19 +13,10 @@ pub struct AnalysisReport {
     pub avg_time_per_move: f32,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct GameAnalysisReport {
     pub visible: bool,
     pub last_report: Option<AnalysisReport>,
-}
-
-impl Default for GameAnalysisReport {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            last_report: None,
-        }
-    }
 }
 
 impl GameAnalysisReport {

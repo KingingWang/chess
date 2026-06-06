@@ -2,9 +2,10 @@
 
 use bevy::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum GameSpeed {
     Slow,
+    #[default]
     Normal,
     Fast,
     VeryFast,
@@ -34,12 +35,6 @@ impl GameSpeed {
             Self::Fast => Self::VeryFast,
             Self::VeryFast => Self::Slow,
         }
-    }
-}
-
-impl Default for GameSpeed {
-    fn default() -> Self {
-        Self::Normal
     }
 }
 

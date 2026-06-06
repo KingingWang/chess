@@ -11,19 +11,10 @@ pub struct MoveComparison {
     pub ai_eval: Option<i32>,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct MoveComparisonTracker {
     pub active: bool,
     pub comparisons: Vec<MoveComparison>,
-}
-
-impl Default for MoveComparisonTracker {
-    fn default() -> Self {
-        Self {
-            active: false,
-            comparisons: Vec::new(),
-        }
-    }
 }
 
 impl MoveComparisonTracker {

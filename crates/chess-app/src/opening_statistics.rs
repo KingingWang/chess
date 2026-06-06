@@ -12,19 +12,10 @@ pub struct OpeningStat {
     pub avg_rating: Option<u32>,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct OpeningStatistics {
     pub stats: HashMap<String, OpeningStat>,
     pub visible: bool,
-}
-
-impl Default for OpeningStatistics {
-    fn default() -> Self {
-        Self {
-            stats: HashMap::new(),
-            visible: false,
-        }
-    }
 }
 
 impl OpeningStatistics {

@@ -6,16 +6,10 @@
 use bevy::prelude::*;
 
 /// Resource managing Chinese notation display.
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 pub struct ChineseNotation {
     /// Whether to show Chinese notation in the history panel.
     pub enabled: bool,
-}
-
-impl Default for ChineseNotation {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
 }
 
 /// Chinese piece names (Red side).

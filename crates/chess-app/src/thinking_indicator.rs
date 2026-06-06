@@ -60,7 +60,7 @@ impl ThinkingIndicator {
         }
     }
     pub fn dots_text(&self) -> String {
-        let n = ((self.elapsed * 2.0) as usize % 4);
+        let n = (self.elapsed * 2.0) as usize % 4;
         format!("思考中{}", ".".repeat(n))
     }
 }
