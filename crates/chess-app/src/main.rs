@@ -289,6 +289,7 @@ fn main() {
         });
         app.insert_resource(animation::AnimSpeedSetting(user_settings.anim_speed));
         app.insert_resource(board_view::ShowCoordinates(user_settings.show_coordinates));
+        app.insert_resource(board_view::CoordinateStyle::default());
         saved_difficulty = user_settings.difficulty;
     }
 
