@@ -15,6 +15,7 @@ use crate::app_state::{
 };
 use crate::board_theme::BoardTheme;
 use crate::drag::Dragging;
+use crate::blindfold::BlindfoldMode;
 use crate::history_view::HistoryView;
 
 /// Set to `true` by any system that mutates the game; the render system redraws
@@ -484,6 +485,20 @@ pub fn setup_board(
     }
 }
 
+/// Bundle of read-only resources for piece rendering.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct RenderResources<'w> {
+    core: Res<'w, CoreGame>,
+    selection: Res<'w, Selection>,
+    orient: Res<'w, BoardOrientation>,
+    theme: Res<'w, BoardTheme>,
+    anim_playing: Res<'w, AnimationPlaying>,
+    anim_speed: Res<'w, AnimSpeedSetting>,
+    history_view: Res<'w, HistoryView>,
+    board_scale_in: Res<'w, BoardScaleIn>,
+    blindfold: Res<'w, BlindfoldMode>,
+}
+
 /// Redraw all pieces + highlights when [`RenderDirty`] is set.
 ///
 /// Defers the redraw while an animation is playing so that mid-animation
@@ -493,14 +508,8 @@ pub fn setup_board(
 pub fn redraw_pieces(
     mut dirty: ResMut<RenderDirty>,
     mut commands: Commands,
-    core: Res<CoreGame>,
-    selection: Res<Selection>,
     fonts: Res<UiFonts>,
-    orient: Res<BoardOrientation>,
-    theme: Res<BoardTheme>,
-    anim_playing: Res<AnimationPlaying>,
-    anim_speed: Res<AnimSpeedSetting>,
-    history_view: Res<HistoryView>,
+    res: RenderResources,
     highlight_q: Query<Entity, With<HighlightMarker>>,
     mut piece_q: Query<
         (Entity, &mut PieceSquare, &mut Transform),
@@ -513,16 +522,16 @@ pub fn redraw_pieces(
     capture_q: Query<Entity, With<PendingCapture>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    board_scale_in: Res<BoardScaleIn>,
 ) {
-    let orient = *orient;
+    let orient = *res.orient;
+    let player_is_red = orient == BoardOrientation::Red;
     if !dirty.0 {
         return;
     }
 
     // Defer the dirty redraw while animation is in-flight. The flag stays
     // set so the next frame after animation finishes will process it.
-    if anim_playing.0 {
+    if res.anim_playing.0 {
         return;
     }
 
@@ -541,18 +550,28 @@ pub fn redraw_pieces(
 
     // --- Diff-based piece rendering with animation awareness ---
     // In history view, render the historical position.
-    let viewing = history_view.viewing_ply;
+    let viewing = res.history_view.viewing_ply;
     let display_board;
     let board_ref = if let Some(ply) = viewing {
-        display_board = core
+        display_board = res.core
             .game
             .board_at_ply(ply)
-            .unwrap_or_else(|| core.game.board().clone());
+            .unwrap_or_else(|| res.core.game.board().clone());
         &display_board
     } else {
-        core.game.board()
+        res.core.game.board()
     };
-    let board_pieces: Vec<(chess_core::Square, chess_core::Piece)> = board_ref.pieces().collect();
+    let board_pieces: Vec<(chess_core::Square, chess_core::Piece)> = board_ref
+        .pieces()
+        .filter(|(_, piece)| {
+            if res.blindfold.active {
+                let piece_is_red = piece.color == ChessColor::Red;
+                res.blindfold.is_piece_visible(piece_is_red, player_is_red)
+            } else {
+                true
+            }
+        })
+        .collect();
 
     let existing_pieces: Vec<(Entity, PieceSquare)> =
         piece_q.iter().map(|(e, ps, _)| (e, *ps)).collect();
@@ -578,7 +597,7 @@ pub fn redraw_pieces(
     let mut animated_entity: Option<Entity> = None;
     let suppress_animation = viewing.is_some();
     if !suppress_animation {
-        if let Some((from_sq, to_sq)) = core.last_move {
+        if let Some((from_sq, to_sq)) = res.core.last_move {
             // Find the uncovered board entry at to_sq.
             let to_idx = board_pieces
                 .iter()
@@ -600,7 +619,7 @@ pub fn redraw_pieces(
 
                     let from_pos = square_to_world(from_sq, orient);
                     let to_pos = square_to_world(to_sq, orient);
-                    let dur = anim_speed.0.duration();
+                    let dur = res.anim_speed.0.duration();
                     commands
                         .entity(*entity)
                         .insert(AnimateSlide::with_duration(from_pos, to_pos, dur));
@@ -613,7 +632,7 @@ pub fn redraw_pieces(
                         kept[ci] = true; // shield from despawn — animate_pieces handles it
                         commands
                             .entity(*cap_entity)
-                            .insert(PendingCapture::with_duration(anim_speed.0.duration()));
+                            .insert(PendingCapture::with_duration(res.anim_speed.0.duration()));
                     }
                 }
             }
@@ -630,11 +649,11 @@ pub fn redraw_pieces(
     for (entity, mut ps, mut transform) in &mut piece_q {
         if Some(entity) == animated_entity {
             // Update PieceSquare to the destination square.
-            if let Some((_, to_sq)) = core.last_move {
+            if let Some((_, to_sq)) = res.core.last_move {
                 ps.sq = to_sq;
             }
             // Place at FROM position — AnimateSlide will lerp to TO.
-            if let Some((from_sq, _)) = core.last_move {
+            if let Some((from_sq, _)) = res.core.last_move {
                 let from_pos = square_to_world(from_sq, orient);
                 transform.translation.x = from_pos.x;
                 transform.translation.y = from_pos.y;
@@ -648,10 +667,10 @@ pub fn redraw_pieces(
 
     // Spawn new pieces for uncovered board positions.
     let disc = meshes.add(Circle::new(PIECE_RADIUS));
-    let cream_mat = materials.add(theme.palette.disc_face);
+    let cream_mat = materials.add(res.theme.palette.disc_face);
     let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.28));
     let border_disc = meshes.add(Circle::new(PIECE_RADIUS + 0.5));
-    let border_mat = materials.add(theme.palette.disc_border);
+    let border_mat = materials.add(res.theme.palette.disc_border);
 
     for (j, (sq, piece)) in board_pieces.iter().enumerate() {
         if board_covered[j] {
@@ -659,8 +678,8 @@ pub fn redraw_pieces(
         }
         let pos = square_to_world(*sq, orient);
         let ink = match piece.color {
-            ChessColor::Red => theme.palette.red_ink,
-            ChessColor::Black => theme.palette.black_ink,
+            ChessColor::Red => res.theme.palette.red_ink,
+            ChessColor::Black => res.theme.palette.black_ink,
         };
         let ink_mat = materials.add(ink);
 
@@ -670,7 +689,7 @@ pub fn redraw_pieces(
                 MeshMaterial2d(cream_mat.clone()),
                 Transform {
                     translation: Vec3::new(pos.x, pos.y, 10.0),
-                    scale: if board_scale_in.active {
+                    scale: if res.board_scale_in.active {
                         Vec3::splat(0.0)
                     } else {
                         Vec3::ONE
@@ -722,16 +741,18 @@ pub fn redraw_pieces(
     // In history view, highlight the move at the viewed ply.
     let highlight_move = if let Some(ply) = viewing {
         if ply > 0 {
-            let entry = &core.game.history()[ply - 1];
+            let entry = &res.core.game.history()[ply - 1];
             let mv = entry.mv();
             Some((mv.from, mv.to))
         } else {
             None
         }
     } else {
-        core.last_move
+        res.core.last_move
     };
-    if let Some((lm_from, lm_to)) = highlight_move {
+    // Hide move indicators in extreme blindfold mode.
+    let show_move_indicators = !res.blindfold.active || res.blindfold.show_move_indicators();
+    if let Some((lm_from, lm_to)) = highlight_move.filter(|_| show_move_indicators) {
         let ring_inner = PIECE_RADIUS + 1.0;
         let ring_outer = PIECE_RADIUS + 5.0;
         let ring_mesh = meshes.add(Annulus::new(ring_inner, ring_outer));
@@ -763,7 +784,7 @@ pub fn redraw_pieces(
 
     // Selection highlight + legal destination dots (not shown in history view).
     if viewing.is_none() {
-        if let Some(from) = selection.from {
+        if let Some(from) = res.selection.from {
             let pos = square_to_world(from, orient);
             commands.spawn((
                 Sprite {
@@ -775,12 +796,13 @@ pub fn redraw_pieces(
                 HighlightMarker,
                 SelectionHighlight,
             ));
-            for mv in core
-                .game
-                .legal_moves()
-                .into_iter()
-                .filter(|m| m.from == from)
-            {
+            if show_move_indicators {
+                for mv in res.core
+                    .game
+                    .legal_moves()
+                    .into_iter()
+                    .filter(|m| m.from == from)
+                {
                 let p = square_to_world(mv.to, orient);
                 let is_capture = board_ref.piece_at(mv.to).is_some();
                 if is_capture {
@@ -803,12 +825,13 @@ pub fn redraw_pieces(
                     ));
                 }
             }
+            }
         }
     }
 
     // Side-to-move indicator: small colored diamond on the board edge.
-    if viewing.is_none() && !core.game.is_over() {
-        let stm = core.game.side_to_move();
+    if viewing.is_none() && !res.core.game.is_over() {
+        let stm = res.core.game.side_to_move();
         let (indicator_y, indicator_color) = match stm {
             ChessColor::Red => (-4.0 * CELL, Color::srgba(0.9, 0.2, 0.1, 0.7)),
             ChessColor::Black => (4.0 * CELL, Color::srgba(0.15, 0.15, 0.15, 0.7)),
@@ -829,11 +852,11 @@ pub fn redraw_pieces(
     }
 
     // Check warning: red pulse on the checked king's square.
-    if viewing.is_none() && !core.game.is_over() {
-        let stm = core.game.side_to_move();
-        if core.game.board().is_in_check(stm) {
+    if viewing.is_none() && !res.core.game.is_over() {
+        let stm = res.core.game.side_to_move();
+        if res.core.game.board().is_in_check(stm) {
             // Find the king of the side in check.
-            for (sq, piece) in core.game.board().pieces() {
+            for (sq, piece) in res.core.game.board().pieces() {
                 if piece.color == stm && piece.kind == chess_core::PieceKind::King {
                     let pos = square_to_world(sq, orient);
                     commands.spawn((
