@@ -142,6 +142,7 @@ impl EngineVsEngine {
         SearchLimits {
             movetime: Duration::from_millis(self.config.time_per_move_ms),
             max_depth: self.config.max_depth,
+            ..Default::default()
         }
     }
 

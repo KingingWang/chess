@@ -11,16 +11,12 @@ use crate::app_state::{CoreGame, UiFonts};
 use crate::board_view::RenderDirty;
 use crate::history_view::HistoryView;
 
-// --- Palette (matching the HUD style) ---
-const PANEL_BG: Color = Color::srgba(0.13, 0.10, 0.10, 0.92);
-const CARD_BORDER: Color = Color::srgb(0.62, 0.45, 0.22);
-const TITLE_COLOR: Color = Color::srgb(0.93, 0.84, 0.55);
-const RED_TEXT: Color = Color::srgb(0.85, 0.20, 0.15);
-const BLACK_TEXT: Color = Color::srgb(0.80, 0.78, 0.72);
-const MOVE_NUM_COLOR: Color = Color::srgb(0.55, 0.50, 0.42);
-const HIGHLIGHT_BG: Color = Color::srgba(0.45, 0.35, 0.15, 0.45);
-const CHECK_COLOR: Color = Color::srgb(0.90, 0.65, 0.15);
-const ACTIVE_BORDER: Color = Color::srgba(0.78, 0.62, 0.32, 0.60);
+// --- Palette (玄玉 theme) ---
+use crate::ui_theme::{
+    CARD as PANEL_BG, CINNABAR_HOVER as RED_TEXT, GOLD as CHECK_COLOR, GOLD_BRIGHT as TITLE_COLOR,
+    HAIRLINE as CARD_BORDER, HAIRLINE_STRONG as ACTIVE_BORDER, JADE_FILL as HIGHLIGHT_BG,
+    TEXT as BLACK_TEXT, TEXT_DIM as MOVE_NUM_COLOR,
+};
 
 /// Marker for the history panel root entity.
 #[derive(Component)]
@@ -51,7 +47,7 @@ pub struct MoveEntryPly(pub usize);
 pub fn setup_history_panel(
     mut commands: Commands,
     fonts: Res<UiFonts>,
-    core: Res<crate::app_state::CoreGame>,
+    _core: Res<crate::app_state::CoreGame>,
 ) {
     commands
         .spawn((
@@ -59,11 +55,17 @@ pub fn setup_history_panel(
                 position_type: PositionType::Absolute,
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
-                width: Val::Px(220.0),
+                width: Val::Px(236.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(14.0)),
-                border: UiRect::left(Val::Px(2.0)),
+                // Top padding leaves room for the two clock chips.
+                padding: UiRect {
+                    left: Val::Px(14.0),
+                    right: Val::Px(14.0),
+                    top: Val::Px(72.0),
+                    bottom: Val::Px(14.0),
+                },
+                border: UiRect::left(Val::Px(1.0)),
                 overflow: Overflow::scroll_y(),
                 ..default()
             },
@@ -84,17 +86,10 @@ pub fn setup_history_panel(
                 },))
                 .with_children(|row| {
                     row.spawn((
-                        Text::new({
-                            let (icon, mode) = match core.mode {
-                                crate::app_state::GameMode::VsAi => ("「机」", "人机"),
-                                crate::app_state::GameMode::LocalPvp => ("「友」", "双人"),
-                                _ => ("「网」", "联机"),
-                            };
-                            format!("{} 棋 谱 · {}", icon, mode)
-                        }),
+                        Text::new("棋谱"),
                         TextFont {
                             font: fonts.bold.clone(),
-                            font_size: 22.0,
+                            font_size: 18.0,
                             ..default()
                         },
                         TextColor(TITLE_COLOR),

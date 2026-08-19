@@ -1,10 +1,17 @@
-//! Analysis mode for game evaluation and move suggestions.
+//! Analysis mode: a live engine panel for the current position.
 //!
-//! When enabled, displays real-time engine evaluation, best move suggestions,
-//! and evaluation history.
+//! Ctrl+A toggles it. While active, a background engine search continuously
+//! evaluates the **current** board (restarting after every move), and a card
+//! in the left sidebar shows evaluation, depth, nodes, best move and PV.
+//! During the AI's own thinking turn the panel instead mirrors the game
+//! engine's stream. Scores are displayed from Red's perspective.
 
 use bevy::prelude::*;
 use chess_ai::SearchInfo;
+use crossbeam_channel::{Receiver, TryRecvError};
+
+use crate::app_state::{AiSettings, CoreGame, UiFonts};
+use crate::ui_theme::{CARD, GOLD_BRIGHT, HAIRLINE, JADE, TEXT, TEXT_DIM, TEXT_FAINT};
 
 /// Resource tracking analysis mode state.
 #[derive(Resource, Debug, Clone, Default)]
@@ -23,6 +30,10 @@ pub struct AnalysisMode {
     pub nodes: u64,
     /// Evaluation history for graphing.
     pub eval_history: Vec<i32>,
+    /// FEN of the position the current eval/best-move/PV belong to.
+    /// Display code must only trust the data when this matches the board on
+    /// screen — anything else is stale output from an earlier position.
+    pub info_fen: String,
 }
 
 impl AnalysisMode {
@@ -36,17 +47,24 @@ impl AnalysisMode {
 
     /// Clear analysis data.
     pub fn clear(&mut self) {
+        self.clear_position_data();
+        // Keep eval_history for graphing
+    }
+
+    /// Forget position-specific data (eval, best move, PV) — called whenever
+    /// the board no longer matches the analysed position.
+    pub fn clear_position_data(&mut self) {
         self.eval_score = 0;
         self.best_move = None;
         self.principal_variation.clear();
         self.depth = 0;
         self.nodes = 0;
-        // Keep eval_history for graphing
+        self.info_fen.clear();
     }
 
     /// Update from search info.
     pub fn update_from_search_info(&mut self, info: &SearchInfo) {
-        self.eval_score = info.score;
+        self.eval_score = info.red_score();
         self.depth = info.depth;
         self.nodes = info.nodes;
         self.principal_variation = info.pv.clone();
@@ -89,24 +107,136 @@ impl AnalysisMode {
     }
 }
 
-/// System to update analysis mode from search info.
-pub fn update_analysis_from_search_info(
+/// In-flight background analysis search, if any.
+#[derive(Resource, Default)]
+pub struct AnalysisTask {
+    info_rx: Option<Receiver<SearchInfo>>,
+    done_rx: Option<Receiver<()>>,
+    /// FEN of the position being analysed; a change aborts and relaunches.
+    analyzed_fen: String,
+}
+
+/// Movetime per background analysis pass. Long enough to reach a useful
+/// depth, short enough to react quickly to a new position (the search is
+/// aborted on the next move anyway).
+const ANALYSIS_MOVETIME: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Launch / feed / restart the background analysis search.
+///
+/// The game AI's own search has priority: while it is thinking we do not
+/// run a second engine, and simply mirror its info stream into the panel.
+pub fn analysis_engine_tick(
     mut analysis: ResMut<AnalysisMode>,
-    search_info: Res<crate::ai_bridge::SearchInfoResource>,
-    core: Res<crate::app_state::CoreGame>,
+    mut task: ResMut<AnalysisTask>,
+    core: Res<CoreGame>,
+    settings: Res<AiSettings>,
+    runtime: Res<crate::async_runtime::AsyncRuntime>,
+    mut search_info: ResMut<crate::ai_bridge::SearchInfoResource>,
 ) {
-    if !analysis.active {
+    if !analysis.active || core.game.is_over() {
+        // Drop the receivers; the engine notices the disconnected channel
+        // and stops early instead of finishing an unwatched search.
+        task.info_rx = None;
+        task.done_rx = None;
         return;
     }
 
-    // Update from search info if available
-    if let Some(info) = &search_info.latest {
-        analysis.update_from_search_info(info);
+    let current_fen = core.game.board().to_fen();
+
+    // Invalidate stale display data the moment the board no longer matches
+    // the analysed position (a stale PV move may start from a now-empty
+    // square and must never be rendered against the new board).
+    if !analysis.info_fen.is_empty() && analysis.info_fen != current_fen {
+        analysis.clear_position_data();
     }
 
-    // Record evaluation when a move is made
+    // Record eval history as the game progresses.
     if core.game.history_len() > analysis.eval_history.len() {
         analysis.record_eval();
+    }
+
+    // While the game engine is thinking, its stream already feeds
+    // `search_info.latest` — mirror it and don't launch a second engine.
+    // The mirrored info describes the current position, so tag it as such.
+    if search_info.thinking {
+        if let Some(info) = &search_info.latest {
+            analysis.update_from_search_info(&info.clone());
+            analysis.info_fen = current_fen.clone();
+        }
+        return;
+    }
+
+    // A move was played mid-search: abort immediately. Dropping the
+    // receivers disconnects the channel, and the engine side stops at the
+    // next info line instead of finishing a stale 10 s search.
+    let position_changed = task.analyzed_fen != current_fen;
+    if task.done_rx.is_some() && position_changed {
+        task.info_rx = None;
+        task.done_rx = None;
+    }
+
+    // Drain the background stream (tagged with the analysed FEN).
+    if let Some(rx) = &task.info_rx {
+        while let Ok(info) = rx.try_recv() {
+            analysis.update_from_search_info(&info);
+            analysis.info_fen = task.analyzed_fen.clone();
+            // Also feed the eval bar with the live analysis.
+            search_info.latest = Some(info);
+        }
+    }
+
+    let finished = match &task.done_rx {
+        None => false,
+        Some(rx) => !matches!(rx.try_recv(), Err(TryRecvError::Empty)),
+    };
+    if finished {
+        task.info_rx = None;
+        task.done_rx = None;
+    }
+
+    // (Re)launch when idle and the position has moved on since the last pass.
+    let idle = task.done_rx.is_none();
+    if idle && position_changed {
+        let board = core.game.board().clone();
+        let limits = chess_ai::SearchLimits {
+            movetime: ANALYSIS_MOVETIME,
+            max_depth: 64,
+            variety_window: 0,
+        };
+        let (info_tx, info_rx) = crossbeam_channel::bounded(8);
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let rt = runtime.0.clone();
+        match crate::ai_bridge::engine_config(&settings) {
+            Some(cfg) => {
+                rt.spawn(async move {
+                    match chess_ai::UciEngine::launch(&cfg).await {
+                        Ok(mut engine) => {
+                            let _ = engine
+                                .best_move_with_info(&board, &[], limits.movetime, Some(info_tx))
+                                .await;
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "analysis engine failed to launch");
+                        }
+                    }
+                    let _ = done_tx.send(());
+                });
+            }
+            None => {
+                // No external engine: analyse with the built-in search.
+                rt.spawn(async move {
+                    tokio::task::spawn_blocking(move || {
+                        chess_ai::search::search_with_info(&board, limits, Some(info_tx))
+                    })
+                    .await
+                    .ok();
+                    let _ = done_tx.send(());
+                });
+            }
+        }
+        task.analyzed_fen = current_fen.clone();
+        task.info_rx = Some(info_rx);
+        task.done_rx = Some(done_rx);
     }
 }
 
@@ -115,7 +245,7 @@ pub fn toggle_analysis_mode(
     keys: Res<ButtonInput<KeyCode>>,
     mut analysis: ResMut<AnalysisMode>,
     mut commands: Commands,
-    fonts: Res<crate::app_state::UiFonts>,
+    fonts: Res<UiFonts>,
 ) {
     // Ctrl+A to toggle analysis mode
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
@@ -131,99 +261,205 @@ pub fn toggle_analysis_mode(
     }
 }
 
-/// Marker for analysis UI elements.
+/// Marker for the analysis panel card.
 #[derive(Component)]
-pub struct AnalysisUI;
+pub struct AnalysisPanel;
+/// Marker for the big evaluation value.
+#[derive(Component)]
+pub struct AnalysisEvalText;
+/// Marker for the depth / nodes line.
+#[derive(Component)]
+pub struct AnalysisMetaText;
+/// Marker for the best-move line.
+#[derive(Component)]
+pub struct AnalysisBestText;
+/// Marker for the principal-variation line.
+#[derive(Component)]
+pub struct AnalysisPvText;
 
-/// Spawn analysis mode UI overlay.
-pub fn spawn_analysis_ui(
+/// Spawn or remove the sidebar analysis card as the mode is toggled.
+pub fn manage_analysis_panel(
     mut commands: Commands,
-    fonts: Res<crate::app_state::UiFonts>,
+    fonts: Res<UiFonts>,
     analysis: Res<AnalysisMode>,
+    slot_q: Query<Entity, With<crate::ui::AnalysisSlot>>,
+    panel_q: Query<Entity, With<AnalysisPanel>>,
+) {
+    let exists = !panel_q.is_empty();
+    if analysis.active && !exists {
+        let Ok(slot) = slot_q.single() else { return };
+        commands.entity(slot).with_children(|parent| {
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        padding: UiRect::all(Val::Px(14.0)),
+                        row_gap: Val::Px(6.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    BackgroundColor(CARD),
+                    BorderColor::all(HAIRLINE),
+                    AnalysisPanel,
+                ))
+                .with_children(|card| {
+                    // Header: dot + title.
+                    card.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(7.0),
+                            ..default()
+                        },
+                        children![
+                            (
+                                Node {
+                                    width: Val::Px(6.0),
+                                    height: Val::Px(6.0),
+                                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(JADE),
+                            ),
+                            (
+                                Text::new("分析模式"),
+                                TextFont {
+                                    font: fonts.bold.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(GOLD_BRIGHT),
+                            )
+                        ],
+                    ));
+                    // Big evaluation value.
+                    card.spawn((
+                        Text::new("…"),
+                        TextFont {
+                            font: fonts.bold.clone(),
+                            font_size: 24.0,
+                            ..default()
+                        },
+                        TextColor(TEXT),
+                        AnalysisEvalText,
+                    ));
+                    // Depth / nodes.
+                    card.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(TEXT_FAINT),
+                        AnalysisMetaText,
+                    ));
+                    // Best move.
+                    card.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 13.5,
+                            ..default()
+                        },
+                        TextColor(TEXT),
+                        AnalysisBestText,
+                    ));
+                    // Principal variation.
+                    card.spawn((
+                        Text::new(""),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 11.5,
+                            ..default()
+                        },
+                        TextColor(TEXT_DIM),
+                        AnalysisPvText,
+                    ));
+                });
+        });
+    } else if !analysis.active && exists {
+        for e in &panel_q {
+            commands.entity(e).despawn();
+        }
+    }
+}
+
+/// Keep the panel texts in sync with the latest search info.
+#[allow(clippy::too_many_arguments)]
+pub fn update_analysis_panel(
+    analysis: Res<AnalysisMode>,
+    core: Res<CoreGame>,
+    mut texts: Query<(
+        &mut Text,
+        Option<&AnalysisEvalText>,
+        Option<&AnalysisMetaText>,
+        Option<&AnalysisBestText>,
+        Option<&AnalysisPvText>,
+    )>,
 ) {
     if !analysis.active {
         return;
     }
-
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(10.0),
-                bottom: Val::Px(10.0),
-                width: Val::Px(300.0),
-                height: Val::Px(150.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
-            AnalysisUI,
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("分析模式"),
-                TextFont {
-                    font: fonts.bold.clone(),
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.8, 0.3)),
-            ));
-
-            parent.spawn((
-                Text::new("评估: 0.00"),
-                TextFont {
-                    font: fonts.regular.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-
-            parent.spawn((
-                Text::new("深度: 0"),
-                TextFont {
-                    font: fonts.regular.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            ));
-
-            parent.spawn((
-                Text::new("最佳着法: -"),
-                TextFont {
-                    font: fonts.regular.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            ));
-        });
-}
-
-/// Update analysis UI with current data.
-pub fn update_analysis_ui(
-    analysis: Res<AnalysisMode>,
-    _ui_query: Query<&mut Text, With<AnalysisUI>>,
-) {
-    if !analysis.active {}
-
-    // Update UI elements (simplified - in real implementation would update specific text nodes)
-    // This is a placeholder for the actual UI update logic
-}
-
-/// Despawn analysis UI when mode is disabled.
-pub fn despawn_analysis_ui(
-    mut commands: Commands,
-    analysis: Res<AnalysisMode>,
-    ui_query: Query<Entity, With<AnalysisUI>>,
-) {
-    if !analysis.active {
-        for entity in ui_query.iter() {
-            commands.entity(entity).despawn();
+    for (mut text, is_eval, is_meta, is_best, is_pv) in &mut texts {
+        if is_eval.is_some() {
+            **text = analysis.eval_string();
+        } else if is_meta.is_some() {
+            if analysis.depth > 0 {
+                **text = format!(
+                    "深度 {} · {} 节点",
+                    analysis.depth,
+                    format_nodes(analysis.nodes)
+                );
+            } else {
+                **text = "引擎启动中…".to_string();
+            }
+        } else if is_best.is_some() {
+            **text = match analysis.best_move {
+                Some(mv) => {
+                    // Chinese notation only when the info belongs to the
+                    // board on screen AND the moving piece is still there
+                    // (belt and braces: move_to_chinese panics otherwise).
+                    let fresh = !analysis.info_fen.is_empty()
+                        && analysis.info_fen == core.game.board().to_fen();
+                    if fresh && core.game.board().piece_at(mv.from).is_some() {
+                        format!(
+                            "最佳：{} ({})",
+                            chess_core::notation::move_to_chinese(mv, core.game.board()),
+                            mv.to_iccs()
+                        )
+                    } else {
+                        format!("最佳：{}", mv.to_iccs())
+                    }
+                }
+                None => String::new(),
+            };
+        } else if is_pv.is_some() {
+            if analysis.principal_variation.len() > 1 {
+                let pv: Vec<String> = analysis
+                    .principal_variation
+                    .iter()
+                    .take(6)
+                    .map(|m| m.to_iccs())
+                    .collect();
+                **text = format!("变化：{}", pv.join(" "));
+            } else {
+                **text = String::new();
+            }
         }
+    }
+}
+
+/// Compact node count: 12.3万 / 1.2M style.
+fn format_nodes(n: u64) -> String {
+    if n >= 100_000_000 {
+        format!("{:.1}亿", n as f64 / 1e8)
+    } else if n >= 10_000 {
+        format!("{:.1}万", n as f64 / 1e4)
+    } else {
+        n.to_string()
     }
 }
 
@@ -307,5 +543,52 @@ mod tests {
         assert!(analysis.best_move.is_none());
         assert_eq!(analysis.depth, 0);
         assert_eq!(analysis.nodes, 0);
+    }
+
+    #[test]
+    fn update_from_search_info_uses_red_perspective() {
+        let mut analysis = AnalysisMode::default();
+        let info = chess_ai::SearchInfo {
+            depth: 12,
+            score: -100, // black-to-move sees -1.00 ...
+            side_to_move: chess_core::Color::Black,
+            pv: vec![chess_core::Move::new(
+                chess_core::Square::new(4, 2).unwrap(),
+                chess_core::Square::new(4, 5).unwrap(),
+            )],
+            nodes: 5000,
+            elapsed: std::time::Duration::ZERO,
+            is_final: false,
+        };
+        analysis.update_from_search_info(&info);
+        assert_eq!(analysis.eval_score, 100, "...stored as Red advantage");
+        assert_eq!(analysis.depth, 12);
+        assert!(analysis.best_move.is_some());
+    }
+
+    #[test]
+    fn stale_position_data_is_cleared_on_fen_mismatch() {
+        let mut analysis = AnalysisMode::default();
+        analysis.active = true;
+        analysis.info_fen = "some-position".to_string();
+        analysis.eval_score = 150;
+        analysis.best_move = Some(chess_core::Move::new(
+            chess_core::Square::new(0, 0).unwrap(),
+            chess_core::Square::new(0, 1).unwrap(),
+        ));
+        // Simulates what the tick does when the board no longer matches.
+        if analysis.info_fen != "a-different-position" {
+            analysis.clear_position_data();
+        }
+        assert!(analysis.best_move.is_none());
+        assert_eq!(analysis.eval_score, 0);
+        assert!(analysis.info_fen.is_empty());
+    }
+
+    #[test]
+    fn test_format_nodes() {
+        assert_eq!(format_nodes(999), "999");
+        assert_eq!(format_nodes(12_345), "1.2万");
+        assert_eq!(format_nodes(230_000_000), "2.3亿");
     }
 }

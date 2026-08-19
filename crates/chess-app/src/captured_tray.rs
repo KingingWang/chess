@@ -1,8 +1,9 @@
 //! Captured pieces display tray.
 //!
-//! Shows captured pieces below each player's timer area, grouped by color.
-//! Uses the same piece glyphs as the board, rendered smaller. The tray
-//! updates automatically whenever the board state changes.
+//! Lives inside the left sidebar ([`crate::ui::CapturedSlot`]) as a card,
+//! grouped by capturing color. Uses the same piece glyphs as the board,
+//! rendered smaller. The tray updates whenever the board state changes and
+//! collapses entirely while no pieces have been captured.
 
 use bevy::prelude::*;
 use chess_core::{Color as ChessColor, Piece, PieceKind};
@@ -10,10 +11,9 @@ use chess_core::{Color as ChessColor, Piece, PieceKind};
 use crate::app_state::{CoreGame, UiFonts};
 use crate::board_view::RenderDirty;
 
-const RED_INK: Color = Color::srgb(0.72, 0.11, 0.11);
-const BLACK_INK: Color = Color::srgb(0.30, 0.28, 0.26);
-const TRAY_BG: Color = Color::srgba(0.13, 0.10, 0.08, 0.70);
-const BORDER: Color = Color::srgb(0.45, 0.35, 0.20);
+use crate::ui_theme::{CARD as TRAY_BG, HAIRLINE as BORDER, TEXT_FAINT};
+const RED_INK: Color = crate::ui_theme::CINNABAR_HOVER;
+const BLACK_INK: Color = crate::ui_theme::TEXT;
 
 #[derive(Component)]
 pub struct CapturedTrayRoot;
@@ -21,48 +21,19 @@ pub struct CapturedTrayRoot;
 #[derive(Component)]
 pub struct CapturedEntry;
 
-pub fn setup_captured_tray(mut commands: Commands, fonts: Res<UiFonts>) {
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(10.0),
-                bottom: Val::Px(10.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                min_width: Val::Px(200.0),
-                ..default()
-            },
-            BackgroundColor(TRAY_BG),
-            BorderColor::all(BORDER),
-            CapturedTrayRoot,
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Text::new("吃子"),
-                TextFont {
-                    font: fonts.bold.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.70, 0.62, 0.45)),
-            ));
-        });
-}
-
 fn piece_value(kind: PieceKind) -> i32 {
     crate::app_state::piece_value(kind)
 }
+
 /// Rebuild the captured pieces display when the board changes.
+#[allow(clippy::too_many_arguments)]
 pub fn update_captured_tray(
     dirty: Res<RenderDirty>,
     core: Res<CoreGame>,
     fonts: Res<UiFonts>,
     mut commands: Commands,
-    mut root_q: Query<(Entity, &mut Visibility), With<CapturedTrayRoot>>,
+    slot_q: Query<Entity, With<crate::ui::CapturedSlot>>,
+    mut root_q: Query<(Entity, &mut Node), With<CapturedTrayRoot>>,
     existing: Query<Entity, With<CapturedEntry>>,
     theme: Res<crate::board_theme::BoardTheme>,
 ) {
@@ -70,12 +41,48 @@ pub fn update_captured_tray(
         return;
     }
 
+    // Lazily attach the tray card to the sidebar slot (spawn order between
+    // OnEnter systems is not guaranteed, so we ensure on first update).
+    if root_q.is_empty() {
+        let Ok(slot) = slot_q.single() else { return };
+        commands.entity(slot).with_children(|parent| {
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        display: Display::None,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(6.0),
+                        padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    BackgroundColor(TRAY_BG),
+                    BorderColor::all(BORDER),
+                    CapturedTrayRoot,
+                ))
+                .with_children(|root| {
+                    root.spawn((
+                        Text::new("吃子"),
+                        TextFont {
+                            font: fonts.bold.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(TEXT_FAINT),
+                    ));
+                });
+        });
+        return; // content is filled on the next dirty pass
+    }
+
     // Clear old entries.
     for e in &existing {
         commands.entity(e).despawn();
     }
 
-    let Ok((root, mut root_vis)) = root_q.single_mut() else {
+    let Ok((root, mut root_node)) = root_q.single_mut() else {
         return;
     };
     // Update border to match the current theme.
@@ -96,12 +103,12 @@ pub fn update_captured_tray(
         }
     }
 
-    // Hide the tray when no pieces have been captured.
+    // Collapse the tray while no pieces have been captured.
     if red_captured.is_empty() && black_captured.is_empty() {
-        *root_vis = Visibility::Hidden;
+        root_node.display = Display::None;
         return;
     }
-    *root_vis = Visibility::Inherited;
+    root_node.display = Display::Flex;
 
     // Sort by piece value (most valuable first).
     let sort_key = |k: &PieceKind| -> i32 {
@@ -296,6 +303,8 @@ pub fn update_captured_tray(
     });
 }
 
+/// The tray is a child of the sidebar and dies with it; this only resets
+/// state on exit when called (kept for symmetry with other HUD modules).
 pub fn teardown_captured_tray(mut commands: Commands, q: Query<Entity, With<CapturedTrayRoot>>) {
     for e in &q {
         commands.entity(e).despawn();

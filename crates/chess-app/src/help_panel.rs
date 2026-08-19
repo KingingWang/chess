@@ -70,7 +70,7 @@ pub fn setup_help_panel(
     commands
         .spawn((
             Sprite {
-                color: Color::srgba(0.0, 0.0, 0.0, 0.82),
+                color: Color::srgba(0.075, 0.070, 0.064, 0.92),
                 custom_size: Some(Vec2::new(420.0, 600.0)),
                 ..default()
             },
@@ -86,7 +86,7 @@ pub fn setup_help_panel(
                     font_size: 20.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
+                TextColor(crate::ui_theme::TEXT),
                 Transform::from_xyz(0.0, 0.0, 0.1),
             ));
         });

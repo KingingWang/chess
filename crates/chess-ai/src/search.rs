@@ -77,6 +77,11 @@ pub struct SearchLimits {
     pub movetime: Duration,
     /// Maximum iterative-deepening depth (safety cap).
     pub max_depth: u32,
+    /// Root-move variety window in centipawns: after the last completed
+    /// iteration, pick uniformly at random among root moves scoring within
+    /// this window of the best, instead of always playing the single best
+    /// move. 0 = deterministic best move (used for the strongest setting).
+    pub variety_window: i32,
 }
 
 impl Default for SearchLimits {
@@ -84,6 +89,7 @@ impl Default for SearchLimits {
         SearchLimits {
             movetime: Duration::from_secs(1),
             max_depth: 64,
+            variety_window: 0,
         }
     }
 }
@@ -106,6 +112,9 @@ pub struct SearchInfo {
     pub depth: u32,
     /// Score in centipawns from the side-to-move's perspective.
     pub score: i32,
+    /// Which side was to move in the searched position; combine with
+    /// [`Self::score`] via [`Self::red_score`] for a Red-centric display.
+    pub side_to_move: chess_core::Color,
     /// Principal variation (best line of play found so far).
     pub pv: Vec<Move>,
     /// Total nodes searched so far.
@@ -114,6 +123,16 @@ pub struct SearchInfo {
     pub elapsed: Duration,
     /// Whether this is the final result (search completed or time expired).
     pub is_final: bool,
+}
+
+impl SearchInfo {
+    /// Score in centipawns from **Red's** perspective (positive = Red better).
+    pub fn red_score(&self) -> i32 {
+        match self.side_to_move {
+            chess_core::Color::Red => self.score,
+            chess_core::Color::Black => -self.score,
+        }
+    }
 }
 
 /// Optional callback for streaming search info to the GUI.
@@ -413,11 +432,19 @@ impl Searcher {
     }
 
     /// Send search info to the GUI if a sink is configured.
-    fn send_info(&self, depth: u32, score: i32, pv: Vec<Move>, is_final: bool) {
+    fn send_info(
+        &self,
+        depth: u32,
+        score: i32,
+        pv: Vec<Move>,
+        is_final: bool,
+        side_to_move: chess_core::Color,
+    ) {
         if let Some(ref tx) = self.info_sink {
             let info = SearchInfo {
                 depth,
                 score,
+                side_to_move,
                 pv,
                 nodes: self.nodes,
                 elapsed: self.start_time.elapsed(),
@@ -767,6 +794,9 @@ pub fn search_with_info(
     }
 
     let mut b = board.clone();
+    // Root move scores of the last *completed* iteration, for variety picking.
+    let mut completed_scores: Vec<(Move, i32)> = Vec::new();
+    let mut pass_scores: Vec<(Move, i32)> = Vec::new();
     for depth in 1..=limits.max_depth {
         // Aspiration windows: use a narrow window around the previous score
         // at deeper iterations for faster cutoffs.
@@ -828,6 +858,7 @@ pub fn search_with_info(
             if searcher.stop {
                 break;
             }
+            pass_scores.push((*mv, score));
             if i == 0 || score > best_score {
                 best_score = score;
                 best_move = Some(*mv);
@@ -857,6 +888,7 @@ pub fn search_with_info(
                     }
                 }
 
+                pass_scores.clear();
                 for (i, mv) in moves.iter().enumerate() {
                     let piece = b.piece_at(mv.from).unwrap();
                     let undo = b.make_move(*mv);
@@ -877,6 +909,7 @@ pub fn search_with_info(
                     if searcher.stop {
                         break;
                     }
+                    pass_scores.push((*mv, score));
                     if i == 0 || score > best_score {
                         best_score = score;
                         best_move = Some(*mv);
@@ -893,10 +926,11 @@ pub fn search_with_info(
                 result.best_move = best_move;
                 result.score = best_score;
                 result.depth = depth;
+                completed_scores.clone_from(&pass_scores);
 
                 // Push search info to GUI after each completed depth.
                 let pv = searcher.extract_pv(board, depth);
-                searcher.send_info(depth, best_score, pv, false);
+                searcher.send_info(depth, best_score, pv, false, board.side_to_move());
             }
         }
         result.nodes = searcher.nodes;
@@ -906,10 +940,21 @@ pub fn search_with_info(
         }
     }
 
+    // Move variety: replace the best move with a random near-best one, so
+    // repeated identical positions don't always get the identical reply.
+    if limits.variety_window > 0 && !completed_scores.is_empty() {
+        let mut rng = crate::rng::SmallRng::from_entropy();
+        if let Some(mv) =
+            crate::rng::pick_within_window(&completed_scores, limits.variety_window, &mut rng)
+        {
+            result.best_move = Some(mv);
+        }
+    }
+
     // Send final search info.
     if result.best_move.is_some() {
         let pv = searcher.extract_pv(board, result.depth);
-        searcher.send_info(result.depth, result.score, pv, true);
+        searcher.send_info(result.depth, result.score, pv, true, board.side_to_move());
     }
 
     result
@@ -927,11 +972,13 @@ mod search_info_tests {
         let info = SearchInfo {
             depth: 5,
             score: 150,
+            side_to_move: chess_core::Color::Red,
             pv: vec![],
             nodes: 10000,
             elapsed: Duration::from_millis(500),
             is_final: false,
         };
+        assert_eq!(info.red_score(), 150);
 
         assert_eq!(info.depth, 5);
         assert_eq!(info.score, 150);
@@ -947,6 +994,7 @@ mod search_info_tests {
         let limits = SearchLimits {
             max_depth: 3,
             movetime: Duration::from_millis(100),
+            ..Default::default()
         };
 
         let result = search_with_info(&board, limits, Some(tx));
@@ -983,6 +1031,7 @@ mod search_info_tests {
         let limits = SearchLimits {
             max_depth: 2,
             movetime: Duration::from_millis(50),
+            ..Default::default()
         };
 
         // Should not panic when sink is None
@@ -998,6 +1047,7 @@ mod search_info_tests {
         let limits = SearchLimits {
             max_depth: 4,
             movetime: Duration::from_millis(200),
+            ..Default::default()
         };
 
         let result = search_with_info(&board, limits, Some(tx));
@@ -1021,6 +1071,7 @@ mod search_info_tests {
         let limits = SearchLimits {
             max_depth: 4,
             movetime: Duration::from_millis(200),
+            ..Default::default()
         };
 
         let _result = search_with_info(&board, limits, Some(tx));
@@ -1052,6 +1103,7 @@ mod search_info_tests {
         let limits = SearchLimits {
             max_depth: 5, // Reduced from 10 to avoid extremely deep searches
             movetime: Duration::from_millis(time_limit),
+            ..Default::default()
         };
 
         let start = std::time::Instant::now();
@@ -1097,6 +1149,7 @@ mod aspiration_window_tests {
         let limits = SearchLimits {
             max_depth: 6,
             movetime: std::time::Duration::from_millis(2000),
+            ..Default::default()
         };
 
         // This should not panic even if aspiration window fails
@@ -1116,6 +1169,7 @@ mod aspiration_window_tests {
         let limits = SearchLimits {
             max_depth: 6,
             movetime: std::time::Duration::from_millis(2000),
+            ..Default::default()
         };
 
         // This should not panic even if aspiration window fails
@@ -1124,6 +1178,51 @@ mod aspiration_window_tests {
         assert!(result.best_move.is_some());
         // Note: We don't assert on depth because time constraints may prevent
         // reaching depth 4 in CI environments. The important thing is no panic.
+    }
+
+    #[test]
+    fn variety_zero_is_deterministic() {
+        // With no variety window the search must replay the same move for
+        // the same position, every time.
+        let b = Board::start_position();
+        let limits = SearchLimits {
+            movetime: Duration::from_millis(200),
+            max_depth: 6,
+            variety_window: 0,
+        };
+        let first = search(&b, limits).best_move.unwrap();
+        for _ in 0..3 {
+            assert_eq!(search(&b, limits).best_move.unwrap(), first);
+        }
+    }
+
+    #[test]
+    fn variety_wide_still_returns_legal_near_best_move() {
+        // A huge window may pick any reasonable move, but it must stay legal.
+        let b = Board::start_position();
+        let limits = SearchLimits {
+            movetime: Duration::from_millis(200),
+            max_depth: 6,
+            variety_window: 1000,
+        };
+        for _ in 0..4 {
+            let mv = search(&b, limits).best_move.unwrap();
+            assert!(b.is_legal(mv), "variety pick must stay legal");
+        }
+    }
+
+    #[test]
+    fn red_score_flips_for_black_to_move() {
+        let info = SearchInfo {
+            depth: 1,
+            score: -120,
+            side_to_move: chess_core::Color::Black,
+            pv: vec![],
+            nodes: 0,
+            elapsed: Duration::ZERO,
+            is_final: false,
+        };
+        assert_eq!(info.red_score(), 120);
     }
 
     #[test]
@@ -1136,6 +1235,7 @@ mod aspiration_window_tests {
         let limits = SearchLimits {
             max_depth: 5,
             movetime: std::time::Duration::from_millis(300),
+            ..Default::default()
         };
 
         let result = search(&board, limits);

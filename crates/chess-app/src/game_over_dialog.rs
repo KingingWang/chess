@@ -11,16 +11,17 @@ use crate::app_state::{AppState, ClockResource, CoreGame, Selection, UiFonts};
 use crate::board_view::RenderDirty;
 
 // --- Palette ---
-const OVERLAY_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.65);
-const CARD_BG: Color = Color::srgb(0.16, 0.13, 0.13);
-const CARD_BORDER: Color = Color::srgb(0.62, 0.45, 0.22);
-const RED_COLOR: Color = Color::srgb(0.85, 0.20, 0.15);
-const BLACK_COLOR: Color = Color::srgb(0.90, 0.87, 0.80);
-const DRAW_COLOR: Color = Color::srgb(0.80, 0.70, 0.40);
-const BTN_COLOR: Color = Color::srgb(0.55, 0.16, 0.13);
-const BTN_HOVER: Color = Color::srgb(0.72, 0.22, 0.17);
-const BTN_BORDER: Color = Color::srgb(0.78, 0.62, 0.32);
-const TEXT_COLOR: Color = Color::srgb(0.96, 0.93, 0.86);
+use crate::ui_theme::*;
+const OVERLAY_BG: Color = SCRIM;
+const CARD_BG: Color = PANEL;
+const CARD_BORDER: Color = HAIRLINE_STRONG;
+const RED_COLOR: Color = CINNABAR_HOVER;
+const BLACK_COLOR: Color = TEXT;
+const DRAW_COLOR: Color = GOLD;
+const BTN_COLOR: Color = JADE_FILL;
+const BTN_HOVER: Color = JADE_FILL_HOVER;
+const BTN_BORDER: Color = JADE_BORDER;
+const TEXT_COLOR: Color = TEXT;
 
 #[derive(Component)]
 pub struct GameOverRoot;

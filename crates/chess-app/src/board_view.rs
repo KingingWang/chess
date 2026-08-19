@@ -7,15 +7,16 @@
 //! [`RenderDirty`] is set by any move source.
 
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use chess_core::Color as ChessColor;
 
 use crate::animation::{AnimSpeedSetting, AnimateSlide, AnimationPlaying, PendingCapture};
 use crate::app_state::{
     square_to_world, BoardOrientation, CoreGame, Selection, UiFonts, CELL, PIECE_RADIUS,
 };
+use crate::blindfold::BlindfoldMode;
 use crate::board_theme::BoardTheme;
 use crate::drag::Dragging;
-use crate::blindfold::BlindfoldMode;
 use crate::history_view::HistoryView;
 
 /// Set to `true` by any system that mutates the game; the render system redraws
@@ -60,6 +61,52 @@ impl CoordinateStyle {
             CoordinateStyle::Traditional => "传统",
             CoordinateStyle::Algebraic => "代数",
         }
+    }
+}
+
+/// Keep the whole board (plus its frame and coordinate labels) visible between
+/// the side panels at any window size, by scaling the 2D camera projection.
+/// The board is also optically centered in the free space left of the panels.
+pub fn fit_board_camera(
+    mut cam: Query<(&mut Projection, &mut Transform), With<Camera2d>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Ok((mut proj, mut transform)) = cam.single_mut() else {
+        return;
+    };
+    // World size we must keep visible: board + lacquer frame + coord labels.
+    const NEED_H: f32 = 9.0 * CELL + 2.6 * CELL + 56.0;
+    const NEED_W: f32 = 8.0 * CELL + 2.6 * CELL + 64.0;
+    // Screen estate reserved by the UI side panels (see ui.rs /
+    // history_panel.rs) plus the eval bar and some breathing room.
+    const LEFT_PANEL: f32 = 264.0;
+    const RIGHT_PANEL: f32 = 236.0 + 32.0;
+    let avail_w = (window.width() - LEFT_PANEL - RIGHT_PANEL - 24.0).max(320.0);
+    let avail_h = window.height().max(320.0);
+    let scale = (NEED_H / avail_h).max(NEED_W / avail_w).clamp(0.55, 2.5);
+    if let Projection::Orthographic(ref mut ortho) = *proj {
+        if (ortho.scale - scale).abs() > 0.001 {
+            ortho.scale = scale;
+        }
+    }
+    // Shift the camera left so the board centers in the free area between
+    // the panels rather than in the full window.
+    let target_x = -(LEFT_PANEL - RIGHT_PANEL) * 0.5 * scale;
+    if (transform.translation.x - target_x).abs() > 0.5 {
+        transform.translation.x = target_x;
+    }
+}
+
+/// Reset camera framing when leaving the game (menu uses a plain view).
+pub fn reset_board_camera(mut cam: Query<(&mut Projection, &mut Transform), With<Camera2d>>) {
+    for (mut proj, mut transform) in &mut cam {
+        if let Projection::Orthographic(ref mut ortho) = *proj {
+            ortho.scale = 1.0;
+        }
+        transform.translation.x = 0.0;
     }
 }
 
@@ -172,6 +219,13 @@ fn spawn_star(
             BoardLine,
         ));
     }
+}
+
+/// Coordinate labels sit on the dark frame, so use the (lighter) board
+/// surface colour at high alpha — readable on every theme.
+fn coord_label_color(theme: &BoardTheme) -> Color {
+    let c = theme.palette.board_bg.to_srgba();
+    Color::srgba(c.red, c.green, c.blue, 0.85)
 }
 
 /// Spawn the board background, lacquer frame, grid, river text, and star marks.
@@ -401,20 +455,9 @@ pub fn setup_board(
         ));
     }
 
-    // Decorative horizontal separator line between the river texts.
-    commands.spawn((
-        Sprite {
-            color: river_text_color,
-            custom_size: Some(Vec2::new(CELL * 3.0, 1.5)),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, 0.4),
-        BoardLine,
-    ));
-
     // File labels along bottom and top edges.
     let coord_style = *coord_style;
-    let label_offset = CELL * 0.6;
+    let label_offset = CELL * 0.70;
 
     // File labels (top and bottom)
     for f in 0..9u8 {
@@ -439,10 +482,10 @@ pub fn setup_board(
             Text2d::new(bottom_label),
             TextFont {
                 font: fonts.regular.clone(),
-                font_size: 16.0,
+                font_size: 15.0,
                 ..default()
             },
-            TextColor(theme.palette.river_color),
+            TextColor(coord_label_color(&theme)),
             Transform::from_xyz(x, -4.5 * CELL - label_offset, 0.5),
             BoardLine,
             CoordLabel,
@@ -451,10 +494,10 @@ pub fn setup_board(
             Text2d::new(top_label),
             TextFont {
                 font: fonts.regular.clone(),
-                font_size: 16.0,
+                font_size: 15.0,
                 ..default()
             },
-            TextColor(theme.palette.river_color),
+            TextColor(coord_label_color(&theme)),
             Transform::from_xyz(x, 4.5 * CELL + label_offset, 0.5),
             BoardLine,
             CoordLabel,
@@ -474,10 +517,10 @@ pub fn setup_board(
             Text2d::new(rank_label),
             TextFont {
                 font: fonts.regular.clone(),
-                font_size: 16.0,
+                font_size: 15.0,
                 ..default()
             },
-            TextColor(theme.palette.river_color),
+            TextColor(coord_label_color(&theme)),
             Transform::from_xyz(-4.0 * CELL - label_offset, y, 0.5),
             BoardLine,
             CoordLabel,
@@ -553,7 +596,8 @@ pub fn redraw_pieces(
     let viewing = res.history_view.viewing_ply;
     let display_board;
     let board_ref = if let Some(ply) = viewing {
-        display_board = res.core
+        display_board = res
+            .core
             .game
             .board_at_ply(ply)
             .unwrap_or_else(|| res.core.game.board().clone());
@@ -668,8 +712,8 @@ pub fn redraw_pieces(
     // Spawn new pieces for uncovered board positions.
     let disc = meshes.add(Circle::new(PIECE_RADIUS));
     let cream_mat = materials.add(res.theme.palette.disc_face);
-    let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.28));
-    let border_disc = meshes.add(Circle::new(PIECE_RADIUS + 0.5));
+    let shadow_mat = materials.add(Color::srgba(0.0, 0.0, 0.0, 0.30));
+    let border_disc = meshes.add(Circle::new(PIECE_RADIUS + 1.0));
     let border_mat = materials.add(res.theme.palette.disc_border);
 
     for (j, (sq, piece)) in board_pieces.iter().enumerate() {
@@ -712,15 +756,15 @@ pub fn redraw_pieces(
                 parent.spawn((
                     Mesh2d(disc.clone()),
                     MeshMaterial2d(shadow_mat.clone()),
-                    Transform::from_xyz(2.0, -3.0, -0.5),
+                    Transform::from_xyz(1.5, -2.5, -0.5),
                 ));
                 parent.spawn((
-                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 1.5))),
+                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 2.0))),
                     MeshMaterial2d(ink_mat.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.1),
                 ));
                 parent.spawn((
-                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 4.5))),
+                    Mesh2d(meshes.add(Circle::new(PIECE_RADIUS - 5.5))),
                     MeshMaterial2d(cream_mat.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.2),
                 ));
@@ -728,7 +772,7 @@ pub fn redraw_pieces(
                     Text2d::new(piece.glyph().to_string()),
                     TextFont {
                         font: fonts.bold.clone(),
-                        font_size: 34.0,
+                        font_size: 37.0,
                         ..default()
                     },
                     TextColor(ink),
@@ -797,34 +841,35 @@ pub fn redraw_pieces(
                 SelectionHighlight,
             ));
             if show_move_indicators {
-                for mv in res.core
+                for mv in res
+                    .core
                     .game
                     .legal_moves()
                     .into_iter()
                     .filter(|m| m.from == from)
                 {
-                let p = square_to_world(mv.to, orient);
-                let is_capture = board_ref.piece_at(mv.to).is_some();
-                if is_capture {
-                    // Red-tinted ring around enemy piece to indicate capture.
-                    let ring_inner = PIECE_RADIUS + 1.0;
-                    let ring_outer = PIECE_RADIUS + 5.0;
-                    commands.spawn((
-                        Mesh2d(meshes.add(Annulus::new(ring_inner, ring_outer))),
-                        MeshMaterial2d(materials.add(Color::srgba(0.85, 0.20, 0.12, 0.70))),
-                        Transform::from_xyz(p.x, p.y, 6.0),
-                        HighlightMarker,
-                    ));
-                } else {
-                    // Small green dot for empty square moves.
-                    commands.spawn((
-                        Mesh2d(meshes.add(Circle::new(7.0))),
-                        MeshMaterial2d(materials.add(Color::srgba(0.15, 0.55, 0.25, 0.85))),
-                        Transform::from_xyz(p.x, p.y, 6.0),
-                        HighlightMarker,
-                    ));
+                    let p = square_to_world(mv.to, orient);
+                    let is_capture = board_ref.piece_at(mv.to).is_some();
+                    if is_capture {
+                        // Red-tinted ring around enemy piece to indicate capture.
+                        let ring_inner = PIECE_RADIUS + 1.0;
+                        let ring_outer = PIECE_RADIUS + 5.0;
+                        commands.spawn((
+                            Mesh2d(meshes.add(Annulus::new(ring_inner, ring_outer))),
+                            MeshMaterial2d(materials.add(Color::srgba(0.85, 0.20, 0.12, 0.70))),
+                            Transform::from_xyz(p.x, p.y, 6.0),
+                            HighlightMarker,
+                        ));
+                    } else {
+                        // Small green dot for empty square moves.
+                        commands.spawn((
+                            Mesh2d(meshes.add(Circle::new(7.0))),
+                            MeshMaterial2d(materials.add(Color::srgba(0.15, 0.55, 0.25, 0.85))),
+                            Transform::from_xyz(p.x, p.y, 6.0),
+                            HighlightMarker,
+                        ));
+                    }
                 }
-            }
             }
         }
     }

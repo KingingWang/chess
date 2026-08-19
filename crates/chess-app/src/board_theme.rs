@@ -100,16 +100,17 @@ impl ThemeId {
 impl ThemeId {
     pub fn palette(self) -> Palette {
         match self {
+            // 「玄玉」 default: warm rice-paper field, walnut frame, brass rim.
             ThemeId::Classic => Palette {
-                frame_dark: Color::srgb(0.28, 0.16, 0.09),
-                frame_edge: Color::srgb(0.45, 0.29, 0.16),
-                board_bg: Color::srgb(0.90, 0.79, 0.57),
-                line_color: Color::srgb(0.30, 0.19, 0.10),
-                river_color: Color::srgba(0.30, 0.19, 0.10, 0.55),
-                disc_face: Color::srgb(0.97, 0.93, 0.83),
-                red_ink: Color::srgb(0.72, 0.11, 0.11),
-                black_ink: Color::srgb(0.12, 0.12, 0.14),
-                disc_border: Color::srgba(0.0, 0.0, 0.0, 0.15),
+                frame_dark: Color::srgb(0.196, 0.122, 0.063),
+                frame_edge: Color::srgb(0.478, 0.333, 0.169),
+                board_bg: Color::srgb(0.925, 0.847, 0.663),
+                line_color: Color::srgb(0.337, 0.247, 0.133),
+                river_color: Color::srgba(0.337, 0.247, 0.133, 0.55),
+                disc_face: Color::srgb(0.965, 0.925, 0.827),
+                red_ink: Color::srgb(0.678, 0.141, 0.141),
+                black_ink: Color::srgb(0.145, 0.133, 0.118),
+                disc_border: Color::srgba(0.30, 0.21, 0.10, 0.35),
             },
             ThemeId::Dark => Palette {
                 frame_dark: Color::srgb(0.10, 0.12, 0.08),

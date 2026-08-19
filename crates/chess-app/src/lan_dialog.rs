@@ -24,15 +24,12 @@ use crate::async_runtime::AsyncRuntime;
 use crate::net_bridge::{start_net, NetTarget, RelayConfig};
 
 // --- palette -------------------------------------------------------------
-const OVERLAY: Color = Color::srgba(0.0, 0.0, 0.0, 0.62);
-const CARD: Color = Color::srgb(0.16, 0.13, 0.13);
-const CARD_BORDER: Color = Color::srgb(0.62, 0.45, 0.22);
-const TITLE: Color = Color::srgb(0.93, 0.84, 0.55);
-const LABEL: Color = Color::srgb(0.82, 0.74, 0.58);
-const TEXT: Color = Color::srgb(0.97, 0.94, 0.87);
-const HINT: Color = Color::srgb(0.66, 0.72, 0.55);
-const FIELD_BG: Color = Color::srgb(0.10, 0.09, 0.10);
-const FIELD_BG_FOCUS: Color = Color::srgb(0.19, 0.16, 0.12);
+use crate::ui_theme::{
+    CARD, GOLD_BRIGHT as TITLE, HAIRLINE_STRONG as CARD_BORDER, JADE as HINT, SCRIM as OVERLAY,
+    TEXT, TEXT_DIM as LABEL,
+};
+const FIELD_BG: Color = Color::srgb(0.075, 0.070, 0.064);
+const FIELD_BG_FOCUS: Color = crate::ui_theme::CARD_RAISED;
 const FIELD_BORDER: Color = Color::srgb(0.45, 0.38, 0.25);
 const FIELD_BORDER_FOCUS: Color = Color::srgb(0.88, 0.70, 0.34);
 const BTN_OK: Color = Color::srgb(0.20, 0.45, 0.22);

@@ -15,6 +15,13 @@
 #                    because the graphics and audio backends dlopen them at
 #                    runtime; see docs/RELEASE.md for details.
 #
+#                    The release build also EMBEDS the Pikafish engine +
+#                    NNUE weights for the target platform (when present under
+#                    engines/ — see engines/README.md), so each client binary
+#                    below is a single self-contained file with the strong AI
+#                    baked in. The GPL-3.0 text and the NNUE licence are
+#                    copied into dist/ alongside; keep them when shipping.
+#
 # Usage:
 #   scripts/build-release.sh            # build everything available for the host
 #   scripts/build-release.sh relay      # only the relay
@@ -32,6 +39,12 @@ STRIP=${STRIP:-0}
 
 OUT=dist
 mkdir -p "$OUT"
+
+# GPL requires the licence text to accompany the Pikafish binary (even when
+# embedded); the NNUE weights carry their own non-commercial licence.
+for f in Copying.txt NNUE-License.md PIKAFISH-VERSION; do
+    [ -f "engines/$f" ] && cp "engines/$f" "$OUT/$f"
+done
 
 build_relay() {
     echo ">>> building chess-relay (x86_64-unknown-linux-musl, fully static)"

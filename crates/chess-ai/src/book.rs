@@ -3,7 +3,7 @@
 //! Stores a small set of commonly played openings as sequences of ICCS moves.
 //! When the current game position matches a book line, a book move is returned
 //! instead of running the search engine. This provides instant, strong opening
-//! play for the built-in engine.
+//! play, and the weighted-random selection gives every game a varied opening.
 
 use chess_core::{Board, Move};
 use std::collections::HashMap;
@@ -31,18 +31,39 @@ impl OpeningBook {
         book
     }
 
-    /// Look up a book move for the given position. Returns the highest-weighted
-    /// legal move, or `None` if the position is not in the book.
+    /// Look up a book move for the given position, sampling **weighted
+    /// randomly** among the legal candidates (higher weight = more likely).
+    /// Returns `None` if the position is not in the book.
+    ///
+    /// Randomised selection is deliberate: a deterministic "best weight" pick
+    /// would replay the same opening every game, letting a player memorise
+    /// and repeat one fixed line.
     pub fn lookup(&self, board: &Board) -> Option<Move> {
+        self.lookup_with_rng(board, &mut crate::rng::SmallRng::from_entropy())
+    }
+
+    /// Same as [`Self::lookup`] but with a caller-supplied RNG (tests seed it).
+    pub fn lookup_with_rng(&self, board: &Board, rng: &mut crate::rng::SmallRng) -> Option<Move> {
         let fen = board.to_fen();
         let candidates = self.entries.get(&fen)?;
-        // Find the highest-weighted legal move.
         let legal = board.legal_moves();
-        candidates
+        let pool: Vec<&BookMove> = candidates
             .iter()
             .filter(|bm| legal.contains(&bm.mv))
-            .max_by_key(|bm| bm.weight)
-            .map(|bm| bm.mv)
+            .collect();
+        if pool.is_empty() {
+            return None;
+        }
+        let total: u64 = pool.iter().map(|bm| bm.weight as u64).sum();
+        let mut r = rng.below(total);
+        for bm in &pool {
+            let w = bm.weight as u64;
+            if r < w {
+                return Some(bm.mv);
+            }
+            r -= w;
+        }
+        pool.last().map(|bm| bm.mv)
     }
 
     /// Add a single entry to the book.
@@ -194,6 +215,20 @@ mod tests {
         let b = Board::start_position();
         let mv = book.lookup(&b).unwrap();
         assert!(b.is_legal(mv), "book move must be legal");
+    }
+
+    #[test]
+    fn book_selection_varies_across_seeds() {
+        // The start position has several weighted main lines (中炮/仙人指路/
+        // 飞相 …); across seeds the sampler must eventually pick more than one.
+        let book = OpeningBook::default_book();
+        let b = Board::start_position();
+        let mut seen = std::collections::HashSet::new();
+        for seed in 0..64 {
+            let mut rng = crate::rng::SmallRng::from_seed(seed);
+            seen.insert(book.lookup_with_rng(&b, &mut rng).unwrap());
+        }
+        assert!(seen.len() > 1, "book should vary its opening choice");
     }
 
     #[test]

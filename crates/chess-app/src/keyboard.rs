@@ -402,7 +402,7 @@ fn save_game(commands: &mut Commands, core: &CoreGame, fonts: &UiFonts) {
                 "棋局已保存 ({}, 共{}手, {}): {}",
                 mode_str,
                 core.game.history_len(),
-                &record.date,
+                record.date,
                 filename
             );
             crate::toast::spawn_toast(commands, fonts, &msg);

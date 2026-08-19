@@ -2,24 +2,15 @@
 //!
 //! When the player clicks "人机对战" in the main menu, this dialog appears
 //! with 4 difficulty levels (简单/中等/困难/大师). Selecting one sets the
-//! `AiSettings` resource and transitions to the game.
+//! `AiSettings` resource and transitions to the game. The dialog also shows
+//! which engine will play (bundled Pikafish or the built-in fallback).
 
 use bevy::prelude::*;
 use chess_ai::Difficulty;
 use chess_core::Color as ChessColor;
 
 use crate::app_state::{AiSettings, AppState, CoreGame, GameMode, UiFonts};
-
-// --- Palette ---
-const OVERLAY_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.60);
-const CARD_BG: Color = Color::srgb(0.16, 0.13, 0.12);
-const CARD_BORDER: Color = Color::srgb(0.62, 0.45, 0.22);
-const BTN: Color = Color::srgb(0.55, 0.16, 0.13);
-const BTN_HOVER: Color = Color::srgb(0.72, 0.22, 0.17);
-const BTN_BORDER: Color = Color::srgb(0.78, 0.62, 0.32);
-const TEXT_COLOR: Color = Color::srgb(0.96, 0.93, 0.86);
-const TITLE_COLOR: Color = Color::srgb(0.93, 0.84, 0.55);
-const DESC_COLOR: Color = Color::srgb(0.65, 0.60, 0.50);
+use crate::ui_theme::*;
 
 /// Marker for the difficulty dialog root.
 #[derive(Component)]
@@ -35,6 +26,19 @@ pub struct DifficultyDialogState {
     pub open: bool,
 }
 
+/// Marker for the cancel button.
+#[derive(Component)]
+pub(crate) struct CancelButton;
+
+fn level_desc(d: Difficulty) -> (&'static str, &'static str) {
+    match d {
+        Difficulty::Easy => ("简单", "每步约 0.2 秒 · 轻快随手，适合热身"),
+        Difficulty::Medium => ("中等", "每步约 0.8 秒 · 稳定思考，业余好手"),
+        Difficulty::Hard => ("困难", "每步约 2 秒 · 深度计算，棋力强劲"),
+        Difficulty::Master => ("大师", "每步约 3 秒 · 全力以赴，大师水准"),
+    }
+}
+
 /// Spawn the difficulty selection overlay.
 pub fn spawn_difficulty_dialog(
     mut commands: Commands,
@@ -47,20 +51,18 @@ pub fn spawn_difficulty_dialog(
         return;
     }
 
-    let levels: [(Difficulty, &str, &str); 4] = [
-        (Difficulty::Easy, "① 简  单", "浅搜索，适合初学者 (约800)"),
-        (
-            Difficulty::Medium,
-            "② 中  等",
-            "中等深度，有一定棋力 (约1200)",
-        ),
-        (Difficulty::Hard, "③ 困  难", "深度搜索，较强对手 (约1600)"),
-        (
-            Difficulty::Master,
-            "④ 大  师",
-            "最大搜索深度，棋力最强 (约2000)",
-        ),
+    let levels = [
+        Difficulty::Easy,
+        Difficulty::Medium,
+        Difficulty::Hard,
+        Difficulty::Master,
     ];
+
+    let engine_line = if ai_settings.engine_path.is_some() {
+        "引擎 · Pikafish（强力 NNUE）"
+    } else {
+        "引擎 · 内置（基础）"
+    };
 
     commands
         .spawn((
@@ -72,7 +74,7 @@ pub fn spawn_difficulty_dialog(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(OVERLAY_BG),
+            BackgroundColor(SCRIM),
             GlobalZIndex(50),
             DifficultyDialogRoot,
         ))
@@ -81,142 +83,154 @@ pub fn spawn_difficulty_dialog(
                 .spawn((
                     Node {
                         flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::axes(Val::Px(50.0), Val::Px(35.0)),
-                        row_gap: Val::Px(12.0),
-                        border: UiRect::all(Val::Px(2.0)),
+                        padding: UiRect::axes(Val::Px(36.0), Val::Px(30.0)),
+                        row_gap: Val::Px(10.0),
+                        border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(18.0)),
                         ..default()
                     },
-                    BackgroundColor(CARD_BG),
-                    BorderColor::all(CARD_BORDER),
-                    BoxShadow::new(
-                        Color::srgba(0.0, 0.0, 0.0, 0.6),
-                        Val::Px(0.0),
-                        Val::Px(12.0),
-                        Val::Px(8.0),
-                        Val::Px(40.0),
-                    ),
+                    BackgroundColor(PANEL),
+                    BorderColor::all(HAIRLINE_STRONG),
+                    card_shadow(),
                 ))
                 .with_children(|card| {
-                    // Title
                     card.spawn((
-                        Text::new(format!(
-                            "选择难度 (上次: {})",
-                            ai_settings.difficulty.label()
-                        )),
+                        Text::new("选择难度"),
                         TextFont {
                             font: fonts.bold.clone(),
-                            font_size: 32.0,
+                            font_size: 26.0,
                             ..default()
                         },
-                        TextColor(TITLE_COLOR),
-                        Node {
-                            margin: UiRect::bottom(Val::Px(8.0)),
-                            ..default()
-                        },
+                        TextColor(GOLD_BRIGHT),
                     ));
-
-                    // Difficulty buttons
-                    for (difficulty, label, desc) in levels {
-                        card.spawn((
-                            Button,
-                            DifficultyButton(difficulty),
-                            Node {
-                                width: Val::Px(260.0),
-                                height: Val::Px(55.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                flex_direction: FlexDirection::Column,
-                                border: UiRect::all(Val::Px(1.5)),
-                                border_radius: BorderRadius::all(Val::Px(12.0)),
-                                row_gap: Val::Px(2.0),
-                                ..default()
-                            },
-                            BackgroundColor(BTN),
-                            BorderColor::all(BTN_BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(label),
-                                TextFont {
-                                    font: fonts.bold.clone(),
-                                    font_size: 22.0,
-                                    ..default()
-                                },
-                                TextColor(TEXT_COLOR),
-                            ));
-                            btn.spawn((
-                                Text::new(desc),
-                                TextFont {
-                                    font: fonts.regular.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(DESC_COLOR),
-                            ));
-                        });
-                    }
-
-                    // Cancel button
                     card.spawn((
-                        Button,
-                        DifficultyButton(Difficulty::Hard), // placeholder, action is cancel
-                        Node {
-                            width: Val::Px(260.0),
-                            height: Val::Px(38.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            margin: UiRect::top(Val::Px(6.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.25, 0.22, 0.20)),
-                        BorderColor::all(Color::srgb(0.45, 0.38, 0.30)),
-                        CancelButton,
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("返  回"),
-                            TextFont {
-                                font: fonts.regular.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.70, 0.65, 0.55)),
-                        ));
-                    });
-
-                    // Keyboard hint footer.
-                    card.spawn((
-                        Text::new(format!(
-                            "按 1-4 选择 · Esc 返回 · 当前: {}",
-                            match ai_settings.difficulty {
-                                Difficulty::Easy => "①",
-                                Difficulty::Medium => "②",
-                                Difficulty::Hard => "③",
-                                Difficulty::Master => "④",
-                            }
-                        )),
+                        Text::new(engine_line),
                         TextFont {
                             font: fonts.regular.clone(),
                             font_size: 13.0,
                             ..default()
                         },
-                        TextColor(Color::srgb(0.50, 0.45, 0.38)),
+                        TextColor(if ai_settings.engine_path.is_some() {
+                            JADE
+                        } else {
+                            TEXT_FAINT
+                        }),
                         Node {
-                            margin: UiRect::top(Val::Px(6.0)),
+                            margin: UiRect::bottom(Val::Px(14.0)),
+                            ..default()
+                        },
+                    ));
+
+                    for difficulty in levels {
+                        let (label, desc) = level_desc(difficulty);
+                        let is_current = ai_settings.difficulty == difficulty;
+                        card.spawn((
+                            Button,
+                            DifficultyButton(difficulty),
+                            Node {
+                                width: Val::Px(380.0),
+                                height: Val::Px(56.0),
+                                flex_direction: FlexDirection::Row,
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::horizontal(Val::Px(18.0)),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(12.0)),
+                                ..default()
+                            },
+                            BackgroundColor(BtnStyle::secondary().bg),
+                            BorderColor::all(if is_current {
+                                JADE_BORDER
+                            } else {
+                                BtnStyle::secondary().border
+                            }),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((Node {
+                                flex_direction: FlexDirection::Row,
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.0),
+                                ..default()
+                            },))
+                                .with_children(|left| {
+                                    left.spawn((
+                                        Text::new(label),
+                                        TextFont {
+                                            font: fonts.bold.clone(),
+                                            font_size: 18.0,
+                                            ..default()
+                                        },
+                                        TextColor(TEXT),
+                                    ));
+                                    if is_current {
+                                        left.spawn((
+                                            Text::new("当前"),
+                                            TextFont {
+                                                font: fonts.regular.clone(),
+                                                font_size: 11.0,
+                                                ..default()
+                                            },
+                                            TextColor(JADE),
+                                        ));
+                                    }
+                                });
+                            btn.spawn((
+                                Text::new(desc),
+                                TextFont {
+                                    font: fonts.regular.clone(),
+                                    font_size: 12.0,
+                                    ..default()
+                                },
+                                TextColor(TEXT_FAINT),
+                            ));
+                        });
+                    }
+
+                    // Cancel button (ghost).
+                    card.spawn((
+                        Button,
+                        DifficultyButton(Difficulty::Hard), // placeholder, action is cancel
+                        CancelButton,
+                        Node {
+                            width: Val::Px(380.0),
+                            height: Val::Px(38.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            margin: UiRect::top(Val::Px(10.0)),
+                            border_radius: BorderRadius::all(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("返回"),
+                            TextFont {
+                                font: fonts.regular.clone(),
+                                font_size: 15.0,
+                                ..default()
+                            },
+                            TextColor(TEXT_DIM),
+                        ));
+                    });
+
+                    // Keyboard hint footer.
+                    card.spawn((
+                        Text::new("按 1-4 选择 · Esc 返回"),
+                        TextFont {
+                            font: fonts.regular.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(TEXT_FAINT),
+                        Node {
+                            margin: UiRect::top(Val::Px(10.0)),
                             ..default()
                         },
                     ));
                 });
         });
 }
-
-/// Marker for the cancel button.
-#[derive(Component)]
-pub(crate) struct CancelButton;
 
 /// Handle difficulty button clicks.
 #[allow(clippy::too_many_arguments)]
@@ -299,16 +313,16 @@ pub fn difficulty_dialog_interaction(
             }
             Interaction::Hovered => {
                 *bg = if cancel.is_some() {
-                    BackgroundColor(Color::srgb(0.35, 0.30, 0.26))
+                    BackgroundColor(Color::srgba(0.85, 0.70, 0.42, 0.10))
                 } else {
-                    BackgroundColor(BTN_HOVER)
+                    BackgroundColor(CARD_RAISED)
                 };
             }
             Interaction::None => {
                 *bg = if cancel.is_some() {
-                    BackgroundColor(Color::srgb(0.25, 0.22, 0.20))
+                    BackgroundColor(Color::NONE)
                 } else {
-                    BackgroundColor(BTN)
+                    BackgroundColor(BtnStyle::secondary().bg)
                 };
             }
         }

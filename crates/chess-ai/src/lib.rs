@@ -2,7 +2,7 @@
 //!
 //! Two backends are provided behind one async API:
 //!
-//! * [`UciEngine`] — drives an external **Pikafish** (MIT-licensed, top
+//! * [`UciEngine`] — drives an external **Pikafish** (GPL-3.0, top
 //!   strength) process over the UCI protocol. This is the recommended path to
 //!   reach the project's strength target (≥2600 ELO @ 3 s on an i7-12700K),
 //!   which is met by Pikafish + its NNUE, not by the built-in engine.
@@ -16,6 +16,7 @@
 
 pub mod book;
 pub mod eval;
+pub mod rng;
 pub mod search;
 pub mod tt;
 pub mod uci;
@@ -28,7 +29,8 @@ pub use search::{SearchInfo, SearchInfoSink, SearchLimits, SearchResult};
 pub use uci::{UciConfig, UciEngine, UciError};
 
 /// Difficulty presets mapping to think time and (for the built-in engine) a
-/// depth cap.
+/// depth cap plus a root-move variety window so identical positions do not
+/// always produce identical replies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Difficulty {
     Easy,
@@ -43,18 +45,25 @@ impl Difficulty {
             Difficulty::Easy => SearchLimits {
                 movetime: Duration::from_millis(200),
                 max_depth: 4,
+                // ~1 pawn: noticeably playful, still never drops pieces outright.
+                variety_window: 80,
             },
             Difficulty::Medium => SearchLimits {
                 movetime: Duration::from_millis(800),
                 max_depth: 8,
+                variety_window: 40,
             },
             Difficulty::Hard => SearchLimits {
                 movetime: Duration::from_millis(2000),
                 max_depth: 16,
+                variety_window: 20,
             },
             Difficulty::Master => SearchLimits {
                 movetime: Duration::from_millis(3000),
                 max_depth: 64,
+                // Full strength: always the best move (opening variety still
+                // comes from the randomised book).
+                variety_window: 0,
             },
         }
     }
@@ -140,17 +149,30 @@ impl Ai {
                     .ok()
                     .flatten()
             }
-            Ai::Uci(engine) => match engine.best_move(board, history, limits.movetime).await {
-                Ok(mv) => Some(mv),
-                Err(e) => {
-                    tracing::error!(error = %e, "UCI move failed; falling back to built-in");
-                    let board = board.clone();
-                    tokio::task::spawn_blocking(move || search::search(&board, limits).best_move)
+            Ai::Uci(engine) => {
+                // Consult the opening book first: a raw engine always finds
+                // the same "best" opening, so the weighted-random book is
+                // what gives VsAi games varied openings (skipped on Easy).
+                if use_book {
+                    if let Some(book_mv) = get_book().lookup(board) {
+                        tracing::info!(mv = %book_mv.to_iccs(), "book move");
+                        return Some(book_mv);
+                    }
+                }
+                match engine.best_move(board, history, limits.movetime).await {
+                    Ok(mv) => Some(mv),
+                    Err(e) => {
+                        tracing::error!(error = %e, "UCI move failed; falling back to built-in");
+                        let board = board.clone();
+                        tokio::task::spawn_blocking(move || {
+                            search::search(&board, limits).best_move
+                        })
                         .await
                         .ok()
                         .flatten()
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -183,22 +205,20 @@ impl Ai {
                 .flatten()
             }
             Ai::Uci(engine) => {
-                // For UCI engines, we still send a final info update.
-                match engine.best_move(board, history, limits.movetime).await {
-                    Ok(mv) => {
-                        // Send a minimal info for UCI (no PV available).
-                        if let Some(ref tx) = info_sink {
-                            let _ = tx.try_send(SearchInfo {
-                                depth: 0,
-                                score: 0,
-                                pv: vec![mv],
-                                nodes: 0,
-                                elapsed: std::time::Duration::ZERO,
-                                is_final: true,
-                            });
-                        }
-                        Some(mv)
+                // See `best_move`: book first, for opening variety.
+                if use_book {
+                    if let Some(book_mv) = get_book().lookup(board) {
+                        tracing::info!(mv = %book_mv.to_iccs(), "book move");
+                        return Some(book_mv);
                     }
+                }
+                // UCI engines stream real `info` lines (depth/score/PV)
+                // through the sink; a final event carries the chosen move.
+                match engine
+                    .best_move_with_info(board, history, limits.movetime, info_sink.clone())
+                    .await
+                {
+                    Ok((mv, _)) => Some(mv),
                     Err(e) => {
                         tracing::error!(error = %e, "UCI move failed; falling back to built-in");
                         let board = board.clone();
@@ -241,6 +261,7 @@ mod tests {
             SearchLimits {
                 movetime: Duration::from_secs(2),
                 max_depth: 4,
+                ..Default::default()
             },
         );
         let mv = res.best_move.expect("a move");
@@ -265,6 +286,7 @@ mod tests {
             SearchLimits {
                 movetime: Duration::from_millis(500),
                 max_depth: 6,
+                ..Default::default()
             },
         );
         let mv = res.best_move.expect("a move");
@@ -286,6 +308,7 @@ mod tests {
                 SearchLimits {
                     movetime: Duration::from_millis(300),
                     max_depth: 4,
+                    ..Default::default()
                 },
                 true,
             )

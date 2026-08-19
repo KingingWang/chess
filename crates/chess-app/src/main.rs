@@ -27,11 +27,15 @@ mod board_view;
 mod captured_tray;
 mod clock_ui;
 mod confirm_resign;
+mod devshot;
 #[allow(dead_code)]
 mod difficulty_dialog;
 mod drag;
+mod engine_bundle;
 mod game_over_dialog;
 mod help_panel;
+mod stress;
+mod ui_theme;
 
 mod achievements;
 mod ai_difficulty_scaling;
@@ -262,7 +266,12 @@ fn main() {
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
             title: "中国象棋 Xiangqi".into(),
-            resolution: bevy::window::WindowResolution::new(1280, 800),
+            resolution: bevy::window::WindowResolution::new(1440, 900),
+            // Open centered on the primary monitor rather than wherever the
+            // window server feels like (which may be a disconnected display).
+            position: bevy::window::WindowPosition::Centered(
+                bevy::window::MonitorSelection::Primary,
+            ),
             ..default()
         }),
         ..default()
@@ -292,6 +301,13 @@ fn main() {
         app.insert_resource(board_view::ShowCoordinates(user_settings.show_coordinates));
         app.insert_resource(board_view::CoordinateStyle::default());
         saved_difficulty = user_settings.difficulty;
+    }
+
+    if let Some(shot) = devshot::from_env() {
+        app.insert_resource(shot);
+    }
+    if let Some(stress) = stress::from_env() {
+        app.insert_resource(stress);
     }
 
     app.init_state::<AppState>()
@@ -344,6 +360,7 @@ fn main() {
         .insert_resource(board_scaling::BoardScaling::default())
         .insert_resource(ai_bridge::SearchInfoResource::default())
         .insert_resource(analysis_mode::AnalysisMode::default())
+        .insert_resource(analysis_mode::AnalysisTask::default())
         .insert_resource(game_stats::GameStatistics::default())
         .insert_resource(opening_name::OpeningName::default())
         .insert_resource(move_quality::MoveQualityTracker::default())
@@ -453,8 +470,18 @@ fn main() {
         .insert_resource(game_pgn_exporter::GamePgnExporter::default())
         .insert_resource(move_sound_player::MoveSoundPlayer::default())
         .insert_resource(board_coordinate_display::BoardCoordinateDisplay::default())
-        .insert_resource(ClearColor(Color::srgb(0.07, 0.07, 0.09)))
-        .add_systems(Startup, (setup_camera, sound::init_sounds))
+        .insert_resource(ClearColor(crate::ui_theme::INK))
+        .add_systems(
+            Startup,
+            (
+                setup_camera,
+                sound::init_sounds,
+                devshot::enter_scene,
+                stress::enter,
+            ),
+        )
+        .add_systems(Update, devshot::tick)
+        .add_systems(Update, stress::tick.run_if(in_state(AppState::InGame)))
         // Menu state.
         .add_systems(
             OnEnter(AppState::Menu),
@@ -499,7 +526,6 @@ fn main() {
                 history_panel::setup_history_panel,
                 clock_ui::setup_clock_ui,
                 clock_ui::init_clock,
-                captured_tray::setup_captured_tray,
                 board_view::mark_dirty_on_enter,
                 eval_bar::setup_eval_bar,
                 help_panel::setup_help_panel,
@@ -512,6 +538,7 @@ fn main() {
             (
                 reset_core_session,
                 board_view::teardown_board,
+                board_view::reset_board_camera,
                 net_bridge::teardown_net,
                 ui::teardown_hud,
                 history_panel::teardown_history_panel,
@@ -557,6 +584,10 @@ fn main() {
         )
         .add_systems(
             Update,
+            (board_view::fit_board_camera,).run_if(in_state(AppState::InGame)),
+        )
+        .add_systems(
+            Update,
             (
                 opening_explorer::toggle_opening_explorer,
                 opening_explorer::update_opening_explorer,
@@ -589,9 +620,9 @@ fn main() {
                 board_scaling::apply_board_scaling,
                 eval_bar::update_eval_bar,
                 analysis_mode::toggle_analysis_mode,
-                analysis_mode::update_analysis_from_search_info,
-                analysis_mode::update_analysis_ui,
-                analysis_mode::despawn_analysis_ui,
+                analysis_mode::analysis_engine_tick,
+                analysis_mode::manage_analysis_panel,
+                analysis_mode::update_analysis_panel,
                 clipboard::copy_fen_to_clipboard,
                 clipboard::paste_fen_from_clipboard,
                 help_panel::toggle_help_panel,

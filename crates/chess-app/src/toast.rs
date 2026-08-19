@@ -27,18 +27,28 @@ fn spawn_toast_inner(commands: &mut Commands, fonts: &UiFonts, text: &str, durat
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(60.0),
+                top: Val::Px(72.0),
                 left: Val::Percent(50.0),
-                // Center horizontally by translating back 50%.
-                margin: UiRect::left(Val::Px(-130.0)),
-                width: Val::Px(260.0),
+                // Center horizontally by translating back half the max width.
+                margin: UiRect::left(Val::Px(-240.0)),
+                min_width: Val::Px(220.0),
+                max_width: Val::Px(480.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(10.0)),
+                padding: UiRect::axes(Val::Px(18.0), Val::Px(9.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(12.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.10, 0.08, 0.06, 0.85)),
+            BackgroundColor(crate::ui_theme::CARD),
+            BorderColor::all(crate::ui_theme::HAIRLINE_STRONG),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.5),
+                Val::Px(0.0),
+                Val::Px(8.0),
+                Val::Px(6.0),
+                Val::Px(24.0),
+            ),
             GlobalZIndex(110),
             Toast,
             ToastTimer {
@@ -53,7 +63,7 @@ fn spawn_toast_inner(commands: &mut Commands, fonts: &UiFonts, text: &str, durat
                     font_size: 22.0,
                     ..default()
                 },
-                TextColor(Color::srgba(0.93, 0.84, 0.55, 1.0)),
+                TextColor(crate::ui_theme::TEXT),
             ));
         });
 }
@@ -113,12 +123,12 @@ pub fn update_toasts(
         // Fade out using cubic easing.
         let alpha = 0.85 * (1.0 - frac.powi(3));
         // Fade background.
-        **bg = BackgroundColor(Color::srgba(0.10, 0.08, 0.06, alpha));
+        **bg = BackgroundColor(Color::srgba(0.141, 0.129, 0.110, alpha * 0.94));
         // Fade child text colour to match.
         let text_alpha = 1.0 - frac.powi(3);
         for child in children.iter() {
             if let Ok(mut tc) = text_colors.get_mut(child) {
-                *tc = TextColor(Color::srgba(0.93, 0.84, 0.55, text_alpha));
+                *tc = TextColor(Color::srgba(0.937, 0.910, 0.851, text_alpha));
             }
         }
         if tt.timer.is_finished() {

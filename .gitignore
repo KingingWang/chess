@@ -10,3 +10,16 @@ certs/*.key
 /client.toml
 
 /dist
+
+# Pikafish engine binaries + NNUE (51MB+; downloaded per `engines/README.md`,
+# embedded into release binaries by build.rs — never committed).
+/engines/macos-arm64/
+/engines/linux-x86_64/
+/engines/windows-x86_64/
+/engines/pikafish.nnue
+/engines/Copying.txt
+/engines/NNUE-License.md
+/engines/PIKAFISH-VERSION
+
+# Full Noto Serif CJK source fonts used by scripts/subset_fonts.py (~47MB).
+/assets/fonts/src/

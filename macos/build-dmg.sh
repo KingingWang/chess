@@ -82,6 +82,18 @@ else
     echo "  ⚠ No AppIcon.icns in macos/ — app will use default icon"
 fi
 
+# Pikafish is EMBEDDED in the release binary (see crates/chess-app/build.rs) and
+# extracted to ~/Library/Caches on first launch — nothing to copy here. But GPL
+# requires the licence text to travel with the distribution, and the NNUE
+# weights have their own licence, so ship both inside the bundle.
+mkdir -p "$APP_BUNDLE/Contents/Resources/Licenses"
+for f in Copying.txt NNUE-License.md PIKAFISH-VERSION; do
+    if [ -f "$PROJECT_ROOT/engines/$f" ]; then
+        cp "$PROJECT_ROOT/engines/$f" "$APP_BUNDLE/Contents/Resources/Licenses/$f"
+    fi
+done
+echo "  ✓ Engine licences bundled (Pikafish GPL-3.0 + NNUE terms)"
+
 echo "  ✓ ${APP_NAME}.app ready"
 
 # ─── Step 3: Code sign (ad-hoc) ──────────────────────────────────────────────

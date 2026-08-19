@@ -20,7 +20,8 @@ chess/
 │   └── chess-app    # Bevy front-end (bin `chess`): ECS systems wiring the
 │                    #  above, bevy_ui menus/HUD, non-blocking AI & net bridges.
 ├── assets/          # Game assets (see assets/README.md for the art pipeline).
-├── engines/         # Drop external UCI engine binaries here (see below).
+├── engines/         # Pikafish engine binaries + NNUE (git-ignored; embedded
+│   │                #  into release builds — see engines/README.md).
 └── docs/            # Architecture & rules notes.
 ```
 
@@ -37,6 +38,21 @@ cargo test --workspace
 cargo test -p chess-core --release -- --ignored perft_deep
 ```
 
+### Headless soak test
+
+The app can play itself for hours without a human, to shake out crashes:
+
+```bash
+CHESS_STRESS=1 CHESS_STRESS_SECS=10800 RUST_LOG=info cargo run -p chess-app
+```
+
+A random-legal-move Red plays full games against the AI Black with analysis
+mode toggling between games, occasional undoes, and automatic restarts; it
+logs a heartbeat per minute plus per-game results and exits cleanly when the
+budget runs out (a panic shows up as a dead process instead).
+`CHESS_STRESS_GAMES=N` caps the number of games. The same binary also supports
+`CHESS_SHOT`/`CHESS_SCENE` self-screenshots (see `crates/chess-app/src/devshot.rs`).
+
 ## Game modes
 
 Choose from the main menu:
@@ -52,31 +68,42 @@ highlighted. Buttons: New Game / Resign / Offer Draw / Main Menu.
 
 ## AI engine
 
-The AI is licence-clean (MIT/Apache only) and has two backends:
+The AI has two backends:
 
-1. **Pikafish (recommended)** — the strongest MIT-licensed Xiangqi engine,
-   driven over the standard **UCI** protocol. This is the path to the project's
-   strength target (≥2600 ELO @ 3 s on an i7-12700K), met by Pikafish + its
-   NNUE. Enable it via environment variables:
+1. **Pikafish (bundled in release builds)** — the strongest open-source
+   Xiangqi engine, driven over the standard **UCI** protocol. Release
+   binaries **embed** the Pikafish executable + NNUE weights for the target
+   platform (see `engines/README.md` and `crates/chess-app/build.rs`), so a
+   player who downloads the game gets master-strength AI with zero setup. On
+   first launch the engine is extracted to a per-user cache dir and run as a
+   child process. During development, place the files under `engines/` (they
+   are picked up automatically) or point at a custom build:
 
    ```bash
-   export PIKAFISH_PATH=./engines/pikafish          # engine binary
-   export PIKAFISH_EVAL=./engines/pikafish.nnue      # NNUE weights
+   export PIKAFISH_PATH=./engines/macos-arm64/pikafish   # engine binary
+   export PIKAFISH_EVAL=./engines/pikafish.nnue           # NNUE weights
    cargo run --release -p chess-app
    ```
 
-   See `engines/README.md` for how to obtain platform binaries. Pikafish is
-   **not** bundled (its NNUE weights have their own redistribution terms);
-   the integration is fully implemented and used automatically when present.
+   Licensing: the Pikafish binary is **GPL-3.0** (it runs as a separate
+   process; distributions that include it must ship `engines/Copying.txt` and
+   point to its source), and the NNUE weights are **non-commercial use only**
+   (`engines/NNUE-License.md`). See `engines/README.md` for details.
 
 2. **Built-in fallback** — a pure-Rust alpha-beta + quiescence search
    (`chess-ai::search`). It is correct and club-strength, used automatically
-   when no external engine is configured or it fails to launch, so the game is
-   always playable out of the box. It is **not** a 2600-ELO NNUE engine — that
-   bar is delegated to Pikafish per the spec's "fall back to Pikafish" rule.
+   when no external engine is found or it fails to launch, so the game is
+   always playable out of the box.
 
 Both backends run off the render thread (the built-in via `spawn_blocking`, the
 UCI engine via async process I/O) and never stall the frame loop.
+
+**Move variety**: the opening book (`chess-ai::book`) samples weighted-randomly
+among main lines, so every game starts differently (all difficulties except
+Easy, which skips the book). The built-in engine additionally picks uniformly
+among root moves within a small score window of the best (±80/40/20 cp for
+Easy/Medium/Hard; Master is always full-strength best-move). Pikafish itself
+always plays its best move — its variety comes from the book.
 
 ## Honest scope notes
 

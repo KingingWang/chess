@@ -73,10 +73,17 @@ pub struct AiSettings {
 
 impl Default for AiSettings {
     fn default() -> Self {
+        // Auto-detect the bundled Pikafish engine (env vars > engines/ next to
+        // the exe > repo ./engines > copy embedded in release binaries).
+        // `None` falls back to the built-in engine so the game always works.
+        let detected = crate::engine_bundle::detect();
+        if detected.is_none() {
+            tracing::warn!("no Pikafish engine found; using built-in fallback engine");
+        }
         AiSettings {
             difficulty: chess_ai::Difficulty::Hard,
-            engine_path: std::env::var_os("PIKAFISH_PATH").map(Into::into),
-            eval_file: std::env::var_os("PIKAFISH_EVAL").map(Into::into),
+            engine_path: detected.as_ref().map(|p| p.engine.clone()),
+            eval_file: detected.and_then(|p| p.nnue),
         }
     }
 }
@@ -187,7 +194,7 @@ impl BoardOrientation {
 
 /// Geometry constants for mapping board coordinates to world space.
 pub const CELL: f32 = 64.0;
-pub const PIECE_RADIUS: f32 = 27.0;
+pub const PIECE_RADIUS: f32 = 28.0;
 
 /// World position (x, y) for a board square under the given orientation.
 ///

@@ -12,12 +12,13 @@ use chess_core::{Color as ChessColor, GameClock, GameResult, TimeControl, WinRea
 use crate::app_state::{ClockResource, CoreGame, GameMode, UiFonts};
 use crate::board_view::RenderDirty;
 
-// --- Palette ---
-const TIMER_NORMAL: Color = Color::srgb(0.90, 0.87, 0.80);
-const TIMER_LOW: Color = Color::srgb(0.95, 0.25, 0.15);
-const TIMER_BG: Color = Color::srgba(0.10, 0.08, 0.06, 0.85);
-const TIMER_ACTIVE_BG: Color = Color::srgba(0.25, 0.18, 0.08, 0.90);
-const BORDER_COLOR: Color = Color::srgb(0.62, 0.45, 0.22);
+// --- Palette (玄玉 theme) ---
+use crate::ui_theme::*;
+const TIMER_NORMAL: Color = TEXT;
+const TIMER_LOW: Color = CINNABAR_HOVER;
+const TIMER_BG: Color = CARD;
+const TIMER_ACTIVE_BG: Color = JADE_FILL;
+const BORDER_COLOR: Color = HAIRLINE;
 
 /// Low time threshold (seconds) — below this the timer flashes.
 const LOW_TIME_SECS: u64 = 30;
@@ -61,23 +62,28 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(230.0), // Right of history panel
-                top: Val::Px(10.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
+                right: Val::Px(12.0),
+                top: Val::Px(12.0),
+                width: Val::Px(212.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
                 ..default()
             },
+            // Above the (opaque) history panel which shares the same area.
+            GlobalZIndex(5),
             ClockRoot,
         ))
         .with_children(|root| {
             // Black timer (top = opponent for Red).
             root.spawn((
                 Node {
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                    border: UiRect::all(Val::Px(1.5)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    min_width: Val::Px(100.0),
-                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(1.0),
                     ..default()
                 },
                 BackgroundColor(TIMER_BG),
@@ -86,23 +92,19 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             ))
             .with_children(|bg| {
                 bg.spawn((
-                    Text::new("▶"),
+                    Text::new("黑方"),
                     TextFont {
                         font: fonts.regular.clone(),
-                        font_size: 16.0,
+                        font_size: 10.0,
                         ..default()
                     },
-                    TextColor(TIMER_NORMAL),
-                    Node {
-                        margin: UiRect::right(Val::Px(6.0)),
-                        ..default()
-                    },
+                    TextColor(TEXT_FAINT),
                 ));
                 bg.spawn((
                     Text::new("10:00"),
                     TextFont {
                         font: fonts.bold.clone(),
-                        font_size: 22.0,
+                        font_size: 20.0,
                         ..default()
                     },
                     TextColor(TIMER_NORMAL),
@@ -113,11 +115,13 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             // Red timer (bottom = local player).
             root.spawn((
                 Node {
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                    border: UiRect::all(Val::Px(1.5)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    min_width: Val::Px(100.0),
-                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(1.0),
                     ..default()
                 },
                 BackgroundColor(TIMER_BG),
@@ -126,23 +130,19 @@ pub fn setup_clock_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             ))
             .with_children(|bg| {
                 bg.spawn((
-                    Text::new("▶"),
+                    Text::new("红方"),
                     TextFont {
                         font: fonts.regular.clone(),
-                        font_size: 16.0,
+                        font_size: 10.0,
                         ..default()
                     },
-                    TextColor(TIMER_NORMAL),
-                    Node {
-                        margin: UiRect::right(Val::Px(6.0)),
-                        ..default()
-                    },
+                    TextColor(TEXT_FAINT),
                 ));
                 bg.spawn((
                     Text::new("10:00"),
                     TextFont {
                         font: fonts.bold.clone(),
-                        font_size: 22.0,
+                        font_size: 20.0,
                         ..default()
                     },
                     TextColor(TIMER_NORMAL),

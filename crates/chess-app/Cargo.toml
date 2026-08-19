@@ -38,3 +38,8 @@ features = [
     "bevy_audio",
     "wav",
 ]
+
+# build.rs embeds the bundled Pikafish engine into release binaries and sets
+# `--cfg bundled_engine` only when the engine files are present; allow it.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(bundled_engine)"] }

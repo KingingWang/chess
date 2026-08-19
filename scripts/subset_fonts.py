@@ -10,6 +10,13 @@ from pathlib import Path
 from fontTools.ttLib import TTCollection
 
 ROOT = Path(__file__).resolve().parent.parent
+# Local single-face sources for macOS (download from
+# https://github.com/notofonts/noto-cjk — Serif/OTF/SimplifiedChinese).
+LOCAL_SRC = ROOT / "assets/fonts/src"
+LOCAL = {
+    "regular": LOCAL_SRC / "NotoSerifCJKsc-Regular.otf",
+    "bold":    LOCAL_SRC / "NotoSerifCJKsc-Bold.otf",
+}
 SRC = {
     "regular": "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
     "bold":    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
@@ -46,15 +53,33 @@ def extract_sc(ttc_path: str, out_path: Path) -> None:
 def main() -> int:
     chars = collect_chars()
     print(f"collected {len(chars)} distinct non-ASCII chars from source")
+    # Drop chars the source font cannot provide (e.g. emoji like 🏆) instead
+    # of failing — they fall back to the OS font at runtime.
+    from fontTools.ttLib import TTFont
+    for variant in SRC:
+        local = LOCAL[variant]
+        if local.exists():
+            have = TTFont(str(local), lazy=True).getBestCmap()
+            missing = {c for c in chars if ord(c) not in have and ord(c) > 0xFF60}
+            if missing:
+                print(f"  note: {len(missing)} char(s) not in source font, skipped: "
+                      + ''.join(sorted(missing)))
+                chars -= missing
+            break
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         for variant, ttc in SRC.items():
             full = tmp / f"{variant}-full.otf"
-            extract_sc(ttc, full)
+            local = LOCAL[variant]
+            if local.exists():
+                # Local single-face OTF — no TTC extraction needed.
+                full = local
+            else:
+                extract_sc(ttc, full)
             out = OUT[variant]
             out.parent.mkdir(parents=True, exist_ok=True)
             cmd = [
-                "pyftsubset", str(full),
+                sys.executable, "-m", "fontTools.subset", str(full),
                 f"--text={''.join(sorted(chars))}",
                 f"--unicodes={RANGES}",
                 f"--output-file={out}",

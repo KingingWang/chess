@@ -24,10 +24,10 @@ pub enum ConfirmResignAction {
     Cancel,
 }
 
-const DIALOG_BG: Color = Color::srgba(0.0, 0.0, 0.0, 0.75);
-const BTN_CONFIRM: Color = Color::srgb(0.75, 0.2, 0.15);
-const BTN_CANCEL: Color = Color::srgb(0.3, 0.3, 0.35);
-const BTN_HOVER: Color = Color::srgb(0.5, 0.5, 0.55);
+const DIALOG_BG: Color = crate::ui_theme::SCRIM;
+const BTN_CONFIRM: Color = crate::ui_theme::CINNABAR;
+const BTN_CANCEL: Color = crate::ui_theme::CARD_RAISED;
+const BTN_HOVER: Color = crate::ui_theme::CARD_RAISED;
 
 /// Spawn or despawn the dialog based on visibility resource.
 #[allow(clippy::too_many_arguments)]
@@ -110,7 +110,7 @@ fn spawn_dialog(
                         border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.12, 0.12, 0.15)),
+                    BackgroundColor(crate::ui_theme::PANEL),
                 ))
                 .with_children(|card| {
                     // Check if player has material advantage (warning).
@@ -216,7 +216,7 @@ fn spawn_dialog(
                             font_size: 13.0,
                             ..default()
                         },
-                        TextColor(Color::srgb(0.50, 0.48, 0.45)),
+                        TextColor(crate::ui_theme::TEXT_FAINT),
                         Node {
                             margin: UiRect::top(Val::Px(4.0)),
                             ..default()

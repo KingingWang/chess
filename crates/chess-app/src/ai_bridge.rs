@@ -43,6 +43,28 @@ impl SearchInfoResource {
     }
 }
 
+/// Build the UCI engine config from the settings, or `None` to signal the
+/// built-in fallback. Shared by the game search and the analysis-mode
+/// background search.
+///
+/// A few threads + a modest hash table make short-movetime searches
+/// noticeably stronger; the engine still launches fast since the process is
+/// per-move.
+pub fn engine_config(settings: &AiSettings) -> Option<UciConfig> {
+    let path = settings.engine_path.clone()?;
+    let mut cfg = UciConfig::new(path);
+    if let Some(ev) = &settings.eval_file {
+        cfg = cfg.with_option("EvalFile", ev.to_string_lossy().to_string());
+    }
+    let threads = std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).clamp(1, 4))
+        .unwrap_or(2);
+    Some(
+        cfg.with_option("Threads", threads.to_string())
+            .with_option("Hash", "32"),
+    )
+}
+
 /// If it is the AI's turn and no task is running, start one.
 pub fn request_ai_move(
     core: Res<CoreGame>,
@@ -61,8 +83,7 @@ pub fn request_ai_move(
     let board = core.game.board().clone();
     let limits: SearchLimits = settings.difficulty.limits();
     let use_book = settings.difficulty != Difficulty::Easy;
-    let engine_path = settings.engine_path.clone();
-    let eval_file = settings.eval_file.clone();
+    let engine_cfg = engine_config(&settings);
 
     let (tx, rx) = crossbeam_channel::bounded(1);
     // Bounded channel for search info: GUI drains frequently, 4 slots prevent overflow.
@@ -74,14 +95,8 @@ pub fn request_ai_move(
 
     let rt = runtime.0.clone();
     rt.spawn(async move {
-        let mut ai = match engine_path {
-            Some(path) => {
-                let mut cfg = UciConfig::new(path);
-                if let Some(ev) = eval_file {
-                    cfg = cfg.with_option("EvalFile", ev.to_string_lossy().to_string());
-                }
-                Ai::pikafish(&cfg).await
-            }
+        let mut ai = match engine_cfg {
+            Some(cfg) => Ai::pikafish(&cfg).await,
             None => Ai::builtin(),
         };
         let mv = ai
@@ -151,5 +166,35 @@ pub fn poll_ai_move(
             task.info_rx = None;
             search_info.thinking = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AiSettings;
+
+    #[test]
+    fn engine_config_none_without_external_engine() {
+        let settings = AiSettings {
+            difficulty: chess_ai::Difficulty::Easy,
+            engine_path: None,
+            eval_file: None,
+        };
+        assert!(engine_config(&settings).is_none(), "no engine -> built-in");
+    }
+
+    #[test]
+    fn engine_config_carries_eval_and_tuning_options() {
+        let settings = AiSettings {
+            difficulty: chess_ai::Difficulty::Hard,
+            engine_path: Some("/tmp/fake-pikafish".into()),
+            eval_file: Some("/tmp/fake.nnue".into()),
+        };
+        let cfg = engine_config(&settings).expect("engine configured");
+        let keys: Vec<&str> = cfg.options.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"EvalFile"));
+        assert!(keys.contains(&"Threads"));
+        assert!(keys.contains(&"Hash"));
     }
 }
