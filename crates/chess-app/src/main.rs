@@ -325,6 +325,7 @@ fn main() {
         .init_resource::<BoardOrientation>()
         .init_resource::<lan_dialog::LanDialog>()
         .init_resource::<ai_bridge::AiTask>()
+        .init_resource::<ai_bridge::EngineSession>()
         .init_resource::<animation::AnimationPlaying>()
         .init_resource::<drag::DragState>()
         .init_resource::<help_panel::HelpPanelVisible>()
@@ -585,6 +586,12 @@ fn main() {
         .add_systems(
             Update,
             (board_view::fit_board_camera,).run_if(in_state(AppState::InGame)),
+        )
+        .add_systems(
+            Update,
+            // Runs in every state: aborts in-flight ponders when leaving VsAi
+            // (a ponder search never stops on its own).
+            ai_bridge::engine_session_tick,
         )
         .add_systems(
             Update,

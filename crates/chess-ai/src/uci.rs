@@ -21,7 +21,7 @@
 
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chess_core::{Board, Move};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -130,6 +130,20 @@ fn parse_info_line(
     })
 }
 
+/// Parse a `bestmove <mv> [ponder <mv>]` line. Returns `None` for
+/// non-bestmove lines and unparsable/`(none)` moves (callers turn the latter
+/// into [`UciError::BadMove`] as needed).
+pub fn parse_bestmove_line(line: &str) -> Option<(Move, Option<Move>)> {
+    let rest = line.strip_prefix("bestmove ")?;
+    let mut it = rest.split_whitespace();
+    let mv = Move::from_iccs(it.next()?)?;
+    let ponder = match it.next() {
+        Some("ponder") => it.next().and_then(Move::from_iccs),
+        _ => None,
+    };
+    Some((mv, ponder))
+}
+
 /// A live connection to a running UCI engine process.
 pub struct UciEngine {
     child: Child,
@@ -197,6 +211,118 @@ impl UciEngine {
         }
     }
 
+    /// Send `position fen <fen> [moves …]`. `history` is applied on top of
+    /// `fen` — pass the game's *initial* FEN plus the full move list so the
+    /// engine sees the real game trajectory (repetition detection and its
+    /// transposition table both benefit).
+    pub async fn set_position(&mut self, fen: &str, history: &[Move]) -> Result<(), UciError> {
+        let mut pos = format!("position fen {fen}");
+        if !history.is_empty() {
+            pos.push_str(" moves");
+            for m in history {
+                pos.push(' ');
+                pos.push_str(&m.to_iccs());
+            }
+        }
+        self.send(&pos).await
+    }
+
+    /// `go movetime <ms>`. With `ponder = true` the engine searches in
+    /// ponder mode: per the UCI protocol it must **not** emit `bestmove`
+    /// (nor stop on the clock) until `ponderhit` or `stop` arrives. The
+    /// movetime budget is counted from the `go`, so a ponderhit after the
+    /// human thought longer than the budget yields an instant reply.
+    pub async fn go_movetime(&mut self, movetime: Duration, ponder: bool) -> Result<(), UciError> {
+        let cmd = if ponder {
+            format!("go ponder movetime {}", movetime.as_millis())
+        } else {
+            format!("go movetime {}", movetime.as_millis())
+        };
+        self.send(&cmd).await
+    }
+
+    /// Convert a ponder search into a real one (`ponderhit`).
+    pub async fn ponder_hit(&mut self) -> Result<(), UciError> {
+        self.send("ponderhit").await
+    }
+
+    /// Interrupt the current search (`stop`); a `bestmove` line follows.
+    pub async fn stop(&mut self) -> Result<(), UciError> {
+        self.send("stop").await
+    }
+
+    /// `ucinewgame` + readiness handshake: clears the transposition table and
+    /// game state for a fresh game.
+    pub async fn new_game(&mut self) -> Result<(), UciError> {
+        self.send("ucinewgame").await?;
+        self.send("isready").await?;
+        self.read_until("readyok").await
+    }
+
+    /// Read one stdout line (trimmed). [`UciError::Closed`] at EOF.
+    pub async fn next_line(&mut self) -> Result<String, UciError> {
+        let mut line = String::new();
+        let n = self.stdout.read_line(&mut line).await?;
+        if n == 0 {
+            return Err(UciError::Closed);
+        }
+        Ok(line.trim().to_string())
+    }
+
+    /// Read engine output until `bestmove`, streaming `info` lines to `sink`.
+    /// Returns the best move, the engine's predicted reply (the `ponder`
+    /// move, when reported), and a final info snapshot.
+    pub async fn wait_bestmove(
+        &mut self,
+        stm: chess_core::Color,
+        started: Instant,
+        sink: crate::search::SearchInfoSink,
+    ) -> Result<(Move, Option<Move>, Option<crate::search::SearchInfo>), UciError> {
+        let mut last_info: Option<crate::search::SearchInfo> = None;
+        loop {
+            let line = self.next_line().await?;
+            if let Some(info) = parse_info_line(&line, stm, started.elapsed()) {
+                if let Some(ref tx) = sink {
+                    // Channel is bounded: drop info when the GUI lags. If the
+                    // receiver is gone entirely (e.g. analysis panel closed),
+                    // stop early instead of burning CPU unwatched.
+                    if let Err(crossbeam_channel::TrySendError::Disconnected(_)) =
+                        tx.try_send(info.clone())
+                    {
+                        let _ = self.send("stop").await;
+                    }
+                }
+                last_info = Some(info);
+                continue;
+            }
+            if line.starts_with("bestmove ") {
+                if line.contains("(none)") {
+                    return Err(UciError::BadMove(line));
+                }
+                let (mv, ponder) =
+                    parse_bestmove_line(&line).ok_or_else(|| UciError::BadMove(line.clone()))?;
+                // Final event carrying at least the chosen move.
+                let final_info = crate::search::SearchInfo {
+                    depth: last_info.as_ref().map(|i| i.depth).unwrap_or(0),
+                    score: last_info.as_ref().map(|i| i.score).unwrap_or(0),
+                    side_to_move: stm,
+                    pv: last_info
+                        .as_ref()
+                        .map(|i| i.pv.clone())
+                        .filter(|pv| pv.first() == Some(&mv))
+                        .unwrap_or_else(|| vec![mv]),
+                    nodes: last_info.as_ref().map(|i| i.nodes).unwrap_or(0),
+                    elapsed: started.elapsed(),
+                    is_final: true,
+                };
+                if let Some(ref tx) = sink {
+                    let _ = tx.try_send(final_info.clone());
+                }
+                return Ok((mv, ponder, Some(final_info)));
+            }
+        }
+    }
+
     /// Ask the engine for the best move in `board`, thinking for `movetime`.
     /// `history` is the list of moves played from `board`'s position (usually
     /// empty when sending a full FEN).
@@ -224,70 +350,12 @@ impl UciEngine {
         movetime: Duration,
         sink: crate::search::SearchInfoSink,
     ) -> Result<(Move, Option<crate::search::SearchInfo>), UciError> {
-        let mut pos = format!("position fen {}", board.to_fen());
-        if !history.is_empty() {
-            pos.push_str(" moves");
-            for m in history {
-                pos.push(' ');
-                pos.push_str(&m.to_iccs());
-            }
-        }
-        self.send(&pos).await?;
-        self.send(&format!("go movetime {}", movetime.as_millis()))
+        self.set_position(&board.to_fen(), history).await?;
+        self.go_movetime(movetime, false).await?;
+        let (mv, _ponder, info) = self
+            .wait_bestmove(board.side_to_move(), Instant::now(), sink)
             .await?;
-
-        let start = std::time::Instant::now();
-        let stm = board.side_to_move();
-        let mut last_info: Option<crate::search::SearchInfo> = None;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let n = self.stdout.read_line(&mut line).await?;
-            if n == 0 {
-                return Err(UciError::Closed);
-            }
-            let line = line.trim();
-            if let Some(info) = parse_info_line(line, stm, start.elapsed()) {
-                if let Some(ref tx) = sink {
-                    // Channel is bounded: drop info when the GUI lags. If the
-                    // receiver is gone entirely (e.g. analysis panel closed),
-                    // stop early instead of burning CPU unwatched.
-                    if let Err(crossbeam_channel::TrySendError::Disconnected(_)) =
-                        tx.try_send(info.clone())
-                    {
-                        let _ = self.send("stop").await;
-                    }
-                }
-                last_info = Some(info);
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("bestmove ") {
-                let token = rest.split_whitespace().next().unwrap_or("");
-                if token == "(none)" || token.is_empty() {
-                    return Err(UciError::BadMove(token.to_string()));
-                }
-                let mv =
-                    Move::from_iccs(token).ok_or_else(|| UciError::BadMove(token.to_string()))?;
-                // Final event carrying at least the chosen move.
-                let final_info = crate::search::SearchInfo {
-                    depth: last_info.as_ref().map(|i| i.depth).unwrap_or(0),
-                    score: last_info.as_ref().map(|i| i.score).unwrap_or(0),
-                    side_to_move: stm,
-                    pv: last_info
-                        .as_ref()
-                        .map(|i| i.pv.clone())
-                        .filter(|pv| pv.first() == Some(&mv))
-                        .unwrap_or_else(|| vec![mv]),
-                    nodes: last_info.as_ref().map(|i| i.nodes).unwrap_or(0),
-                    elapsed: start.elapsed(),
-                    is_final: true,
-                };
-                if let Some(ref tx) = sink {
-                    let _ = tx.try_send(final_info.clone());
-                }
-                return Ok((mv, Some(final_info)));
-            }
-        }
+        Ok((mv, info))
     }
 
     /// Politely shut the engine down.
@@ -353,6 +421,24 @@ mod tests {
         assert!(parse("info depth 5 currmove h2e2", Color::Red).is_none());
     }
 
+    #[test]
+    fn parse_bestmove_with_and_without_ponder() {
+        let (mv, ponder) = parse_bestmove_line("bestmove h2e2").unwrap();
+        assert_eq!(mv.to_iccs(), "h2e2");
+        assert!(ponder.is_none());
+
+        let (mv, ponder) = parse_bestmove_line("bestmove h2e2 ponder h9g7").unwrap();
+        assert_eq!(mv.to_iccs(), "h2e2");
+        assert_eq!(ponder.unwrap().to_iccs(), "h9g7");
+
+        // Not a bestmove line / no usable move.
+        assert!(parse_bestmove_line("info depth 3").is_none());
+        assert!(parse_bestmove_line("bestmove (none)").is_none());
+        // "(none)" ponder move degrades to no-ponder instead of failing.
+        let (_, ponder) = parse_bestmove_line("bestmove h2e2 ponder (none)").unwrap();
+        assert!(ponder.is_none());
+    }
+
     /// End-to-end against the real bundled Pikafish when present on this
     /// machine (engines/ is git-ignored, so CI machines skip it).
     #[tokio::test]
@@ -392,5 +478,69 @@ mod tests {
         let final_info = final_info.unwrap();
         assert!(final_info.is_final);
         assert_eq!(final_info.pv.first(), Some(&mv));
+    }
+
+    /// UCI ponder protocol against the real bundled Pikafish (skipped when
+    /// the engine is not present, e.g. on CI). Covers both exits from a
+    /// ponder search: `ponderhit` and `stop`.
+    #[tokio::test]
+    async fn real_engine_ponder_hit_and_stop() {
+        let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let bin = manifest.join("../../engines/macos-arm64/pikafish");
+        let nnue = manifest.join("../../engines/pikafish.nnue");
+        if !(cfg!(all(target_os = "macos", target_arch = "aarch64"))
+            && bin.is_file()
+            && nnue.is_file())
+        {
+            eprintln!("skipping: bundled Pikafish not present");
+            return;
+        }
+
+        let cfg = UciConfig::new(bin)
+            .with_option("EvalFile", nnue.to_string_lossy().to_string())
+            .with_option("Threads", "2")
+            .with_option("Hash", "16");
+        let mut engine = UciEngine::launch(&cfg)
+            .await
+            .expect("handshake with bundled Pikafish");
+        let board = Board::start_position();
+
+        // 1) ponder -> ponderhit: the engine must hold its bestmove while
+        // pondering, then finish within the budget counted from `go`.
+        engine.set_position(&board.to_fen(), &[]).await.unwrap();
+        engine
+            .go_movetime(Duration::from_millis(1500), true)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        engine.ponder_hit().await.unwrap();
+        let (mv, _ponder, _info) = timeout(
+            Duration::from_secs(10),
+            engine.wait_bestmove(board.side_to_move(), Instant::now(), None),
+        )
+        .await
+        .expect("bestmove must follow ponderhit")
+        .expect("valid bestmove");
+        assert!(board.is_legal(mv), "ponderhit move must be legal");
+
+        // 2) ponder -> stop: even with a huge movetime budget, `stop` ends
+        // the ponder promptly (this is the ponder-miss path).
+        engine.set_position(&board.to_fen(), &[]).await.unwrap();
+        engine
+            .go_movetime(Duration::from_secs(600), true)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        engine.stop().await.unwrap();
+        let (mv, _, _) = timeout(
+            Duration::from_secs(5),
+            engine.wait_bestmove(board.side_to_move(), Instant::now(), None),
+        )
+        .await
+        .expect("bestmove must follow stop")
+        .expect("valid bestmove");
+        assert!(board.is_legal(mv), "stop move must be legal");
+
+        engine.quit().await.ok();
     }
 }
