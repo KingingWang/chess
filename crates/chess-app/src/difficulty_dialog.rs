@@ -1,7 +1,7 @@
 //! Difficulty selection dialog shown before starting a VsAi game.
 //!
 //! When the player clicks "人机对战" in the main menu, this dialog appears
-//! with 4 difficulty levels (简单/中等/困难/大师). Selecting one sets the
+//! with 5 difficulty levels (简单/中等/困难/大师/巅峰). Selecting one sets the
 //! `AiSettings` resource and transitions to the game. The dialog also shows
 //! which engine will play (bundled Pikafish or the built-in fallback).
 
@@ -36,6 +36,7 @@ fn level_desc(d: Difficulty) -> (&'static str, &'static str) {
         Difficulty::Medium => ("中等", "每步约 0.8 秒 · 稳定思考，业余好手"),
         Difficulty::Hard => ("困难", "每步约 2 秒 · 深度计算，棋力强劲"),
         Difficulty::Master => ("大师", "每步约 3 秒 · 全力以赴，大师水准"),
+        Difficulty::Extreme => ("巅峰", "每步约 10 秒 · 全线程深算，引擎最强形态"),
     }
 }
 
@@ -56,6 +57,7 @@ pub fn spawn_difficulty_dialog(
         Difficulty::Medium,
         Difficulty::Hard,
         Difficulty::Master,
+        Difficulty::Extreme,
     ];
 
     let engine_line = if ai_settings.engine_path.is_some() {
@@ -216,7 +218,7 @@ pub fn spawn_difficulty_dialog(
 
                     // Keyboard hint footer.
                     card.spawn((
-                        Text::new("按 1-4 选择 · Esc 返回"),
+                        Text::new("按 1-5 选择 · Esc 返回"),
                         TextFont {
                             font: fonts.regular.clone(),
                             font_size: 12.0,
@@ -252,7 +254,7 @@ pub fn difficulty_dialog_interaction(
     dialog_q: Query<Entity, With<DifficultyDialogRoot>>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    // Keyboard shortcuts: 1-4 select difficulty, Escape cancels.
+    // Keyboard shortcuts: 1-5 select difficulty, Escape cancels.
     if state.open && !dialog_q.is_empty() {
         let kb_difficulty = if keys.just_pressed(KeyCode::Digit1) {
             Some(Difficulty::Easy)
@@ -262,6 +264,8 @@ pub fn difficulty_dialog_interaction(
             Some(Difficulty::Hard)
         } else if keys.just_pressed(KeyCode::Digit4) {
             Some(Difficulty::Master)
+        } else if keys.just_pressed(KeyCode::Digit5) {
+            Some(Difficulty::Extreme)
         } else {
             None
         };

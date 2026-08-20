@@ -99,11 +99,12 @@ Both backends run off the render thread (the built-in via `spawn_blocking`, the
 UCI engine via async process I/O) and never stall the frame loop.
 
 **Move variety**: the opening book (`chess-ai::book`) samples weighted-randomly
-among main lines, so every game starts differently (all difficulties except
-Easy, which skips the book). The built-in engine additionally picks uniformly
-among root moves within a small score window of the best (±80/40/20 cp for
-Easy/Medium/Hard; Master is always full-strength best-move). Pikafish itself
-always plays its best move — its variety comes from the book.
+among main lines, so every game starts differently (Easy and Extreme skip the
+book — Easy for playfulness, Extreme so every move is engine-computed). The
+built-in engine additionally picks uniformly among root moves within a small
+score window of the best (±80/40/20 cp for Easy/Medium/Hard; Master and
+Extreme are always full-strength best-move). Extreme is the top tier: 10 s
+per move, all CPU cores, and a 256 MB hash for Pikafish.
 
 ## Honest scope notes
 

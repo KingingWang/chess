@@ -37,6 +37,9 @@ pub enum Difficulty {
     Medium,
     Hard,
     Master,
+    /// Absolute top tier: long thinks, full search depth, zero randomness,
+    /// and no opening book — every move is computed by the engine itself.
+    Extreme,
 }
 
 impl Difficulty {
@@ -65,7 +68,22 @@ impl Difficulty {
                 // comes from the randomised book).
                 variety_window: 0,
             },
+            Difficulty::Extreme => SearchLimits {
+                movetime: Duration::from_millis(10000),
+                max_depth: 64,
+                variety_window: 0,
+            },
         }
+    }
+
+    /// Whether the opening book is consulted at this difficulty.
+    ///
+    /// Easy skips the book (hand-tuned playfulness from move one). Extreme
+    /// skips it too, for the opposite reason: at the top tier every move —
+    /// including the opening — should come from the engine's own search,
+    /// not from a weighted-random book line.
+    pub fn uses_book(self) -> bool {
+        matches!(self, Self::Medium | Self::Hard | Self::Master)
     }
 
     /// Human-readable Chinese label for display in the status bar.
@@ -75,6 +93,7 @@ impl Difficulty {
             Difficulty::Medium => "中等",
             Difficulty::Hard => "困难",
             Difficulty::Master => "大师",
+            Difficulty::Extreme => "巅峰",
         }
     }
     /// Emoji icon for this difficulty.
@@ -84,6 +103,7 @@ impl Difficulty {
             Difficulty::Medium => "中",
             Difficulty::Hard => "难",
             Difficulty::Master => "极",
+            Difficulty::Extreme => "巅",
         }
     }
 }
@@ -100,6 +120,14 @@ static BOOK: std::sync::OnceLock<book::OpeningBook> = std::sync::OnceLock::new()
 
 fn get_book() -> &'static book::OpeningBook {
     BOOK.get_or_init(book::OpeningBook::default_book)
+}
+
+/// Look up an opening-book move directly, without going through [`Ai`].
+///
+/// The app's persistent-engine bridge uses this so book moves never touch
+/// the long-lived engine process.
+pub fn book_move(board: &Board) -> Option<Move> {
+    get_book().lookup(board)
 }
 
 impl Ai {

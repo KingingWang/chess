@@ -869,8 +869,8 @@ pub fn quick_restart(
     }
 }
 
-/// Quick difficulty switch with number keys 1-4 (VsAi mode only).
-/// 1=Easy, 2=Medium, 3=Hard, 4=Expert
+/// Quick difficulty switch with number keys 1-5 (VsAi mode only).
+/// 1=Easy, 2=Medium, 3=Hard, 4=Master, 5=Extreme
 pub fn quick_difficulty(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
@@ -894,6 +894,8 @@ pub fn quick_difficulty(
         Some(chess_ai::Difficulty::Hard)
     } else if keys.just_pressed(KeyCode::Digit4) {
         Some(chess_ai::Difficulty::Master)
+    } else if keys.just_pressed(KeyCode::Digit5) {
+        Some(chess_ai::Difficulty::Extreme)
     } else {
         None
     };
@@ -907,9 +909,10 @@ pub fn quick_difficulty(
                 chess_ai::Difficulty::Medium => 2,
                 chess_ai::Difficulty::Hard => 3,
                 chess_ai::Difficulty::Master => 4,
+                chess_ai::Difficulty::Extreme => 5,
             };
             let msg = format!(
-                "{} 难度: {} → {} ({}/4)",
+                "{} 难度: {} → {} ({}/5)",
                 diff.emoji(),
                 old_label,
                 diff.label(),
