@@ -1,0 +1,209 @@
+# 自动构建并发布 Windows / macOS / Linux 可执行文件。
+#
+# 触发方式：
+#   - 推送形如 v0.1.0 的 tag → 构建全平台并创建 GitHub Release，附上全部产物
+#   - 手动 workflow_dispatch → 仅构建，产物可在 Actions 运行页下载（不建 Release）
+#
+# 产物（详见 docs/RELEASE.md）：
+#   - chess-<ver>-windows-x86_64.zip         Windows 客户端（内嵌 Pikafish AI）
+#   - Xiangqi-<ver>-macos-arm64.dmg          macOS Apple Silicon 客户端（.app/DMG，ad-hoc 签名，内嵌 Pikafish）
+#   - chess-<ver>-linux-x86_64.tar.gz        Linux x86_64 客户端（内嵌 Pikafish）
+#   - chess-relay-<ver>-linux-x86_64.tar.gz  中继服务器（musl 完全静态，含 relay.toml.example）
+#
+# 注意：Pikafish 引擎与 NNUE 权重不入库（见 engines/README.md），CI 中从官方
+# release 下载并固定到 PIKA_TAG 指定的版本；GPL/NNUE 许可文件随产物一起打包。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # 固定的官方 Pikafish 版本（与 engines/PIKAFISH-VERSION 保持一致；升级引擎时改这里）
+  PIKA_TAG: Pikafish-2026-01-02
+  PIKA_ARCHIVE: Pikafish.2026-01-02.7z
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: macos-latest
+            platform: macos-arm64
+          - os: windows-latest
+            platform: windows-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Compute version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "using VERSION=${VERSION}"
+
+      - name: Linux build dependencies (Bevy system libs + musl toolchain)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config g++ libx11-dev libxkbcommon-dev libasound2-dev \
+            libudev-dev libwayland-dev musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Fetch bundled Pikafish engine (pinned official release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 7z 在三平台 runner 镜像中均自带；若 PATH 缺失则回退安装
+          if command -v 7z >/dev/null 2>&1; then SZ=7z
+          elif command -v 7zz >/dev/null 2>&1; then SZ=7zz
+          else brew install --quiet p7zip >/dev/null; SZ=7z; fi
+          curl -fsSL -o pikafish.7z \
+            "https://github.com/official-pikafish/Pikafish/releases/download/${PIKA_TAG}/${PIKA_ARCHIVE}"
+          case "${RUNNER_OS}" in
+            Linux)
+              mkdir -p engines/linux-x86_64
+              "$SZ" e -y -oengines/linux-x86_64 pikafish.7z Linux/pikafish-sse41-popcnt >/dev/null
+              mv engines/linux-x86_64/pikafish-sse41-popcnt engines/linux-x86_64/pikafish
+              chmod +x engines/linux-x86_64/pikafish
+              ;;
+            macOS)
+              mkdir -p engines/macos-arm64
+              "$SZ" e -y -oengines/macos-arm64 pikafish.7z MacOS/pikafish-apple-silicon >/dev/null
+              mv engines/macos-arm64/pikafish-apple-silicon engines/macos-arm64/pikafish
+              chmod +x engines/macos-arm64/pikafish
+              ;;
+            Windows)
+              mkdir -p engines/windows-x86_64
+              "$SZ" e -y -oengines/windows-x86_64 pikafish.7z Windows/pikafish-sse41-popcnt.exe >/dev/null
+              mv engines/windows-x86_64/pikafish-sse41-popcnt.exe engines/windows-x86_64/pikafish.exe
+              ;;
+          esac
+          "$SZ" e -y -oengines pikafish.7z pikafish.nnue Copying.txt NNUE-License.md >/dev/null
+          echo "${PIKA_TAG} (official release)" > engines/PIKAFISH-VERSION
+          rm pikafish.7z
+          ls -la engines
+
+      - name: Test gate (rules engine + networking + relay e2e)
+        if: runner.os == 'Linux'
+        run: cargo test -p chess-core -p chess-net -p chess-relay
+
+      - name: Build chess client (release)
+        shell: bash
+        run: |
+          cargo build --release -p chess-app
+          # 体积明显变大说明 NNUE + 引擎已成功内嵌（build.rs 输出 embedding 警告）
+          ls -lh target/release/chess*
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 中继：musl 完全静态（见 docs/RELEASE.md）
+          RUSTFLAGS="-C target-feature=+crt-static" \
+            cargo build --release -p chess-relay --target x86_64-unknown-linux-musl
+
+          mkdir -p dist client-stage relay-stage
+          strip target/release/chess
+          strip target/x86_64-unknown-linux-musl/release/chess-relay
+
+          cp target/release/chess client-stage/chess
+          cp engines/Copying.txt engines/NNUE-License.md engines/PIKAFISH-VERSION client-stage/
+          tar czf "dist/chess-${VERSION}-linux-x86_64.tar.gz" -C client-stage \
+            chess Copying.txt NNUE-License.md PIKAFISH-VERSION
+
+          cp target/x86_64-unknown-linux-musl/release/chess-relay relay-stage/chess-relay
+          cp relay.toml.example relay-stage/
+          tar czf "dist/chess-relay-${VERSION}-linux-x86_64.tar.gz" -C relay-stage \
+            chess-relay relay.toml.example
+
+          cd dist
+          for f in *.tar.gz; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          strip target/release/chess
+          # 复用仓库自带脚本：组装 Xiangqi.app（含 Info.plist/图标/许可）→ ad-hoc 签名 → DMG
+          bash macos/build-dmg.sh
+          mkdir -p dist
+          cp target/macos-bundle/*.dmg "dist/Xiangqi-${VERSION}-macos-arm64.dmg"
+          cd dist
+          for f in *.dmg; do shasum -a 256 "$f" > "$f.sha256"; done
+          ls -la
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force dist, staging | Out-Null
+          Copy-Item target/release/chess.exe staging/
+          Copy-Item engines/Copying.txt, engines/NNUE-License.md, engines/PIKAFISH-VERSION staging/
+          Compress-Archive -Path staging/* -DestinationPath "dist/chess-$env:VERSION-windows-x86_64.zip"
+          Get-ChildItem dist -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            Set-Content -Path "$($_.FullName).sha256" -Value "$hash  $($_.Name)" -NoNewline
+          }
+          Get-ChildItem dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
